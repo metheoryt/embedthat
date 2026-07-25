@@ -114,15 +114,6 @@ class YouTubeVideoData(BaseModel):
         return the_group
 
     @property
-    def single_video(self):
-        return dict(
-            video=self.file_ids[0],
-            width=self.width,
-            height=self.height,
-            caption=self.caption,
-        )
-
-    @property
     def audio_button_markup(self) -> types.InlineKeyboardMarkup:
         return types.InlineKeyboardMarkup(
             inline_keyboard=[[
@@ -138,7 +129,10 @@ class YouTubeVideoData(BaseModel):
         else:
             await bot.send_video(
                 chat_id,
-                **self.single_video,
+                video=self.file_ids[0],
+                width=self.width,
+                height=self.height,
+                caption=self.caption,
                 reply_to_message_id=reply_to_message_id,
                 reply_markup=self.audio_button_markup,
             )
@@ -148,4 +142,10 @@ class YouTubeVideoData(BaseModel):
             await message.reply_media_group(self.media_group)
             await message.reply("🎵 Want just the audio?", reply_markup=self.audio_button_markup)
         else:
-            await message.reply_video(**self.single_video, reply_markup=self.audio_button_markup)
+            await message.reply_video(
+                video=self.file_ids[0],
+                width=self.width,
+                height=self.height,
+                caption=self.caption,
+                reply_markup=self.audio_button_markup,
+            )
