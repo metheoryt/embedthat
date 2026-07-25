@@ -18,11 +18,32 @@ uv run main.py
 # Run with Docker Compose (includes Redis)
 docker compose up -d
 
-# Build Docker image
-docker build -t metheoryt/embedthat:latest .
+# Build the image locally (dev only — never tag it `metheoryt/embedthat:*`, see Deployment)
+docker build -t embedthat:dev .
 ```
 
 There is no test suite or linter configured.
+
+## Deployment
+
+Production runs on the homeserver (`g513ie`) through the **config-driven poll-and-build**
+pipeline owned by the `vps` repo — no registry, no CI publish. **Pushing to `main` is the
+deploy**; it lands within ~3 minutes plus build time.
+
+- The `repos-deploy` scheduled task runs `vps/homeserver/deploy-repos.ps1` every 3 minutes
+  over every entry in `vps/homeserver/repos.psd1`.
+- Per repo it fast-forwards a gitignored clone at `vps/homeserver/embedthat/src/` and, only
+  when the source SHA or the rendered compose config changed, archives the container logs,
+  rebuilds, and recreates the stack.
+- The prod compose lives in `vps` (`vps/homeserver/embedthat/compose.prod.yml`), not here —
+  this repo carries only the dev `compose.yml`.
+
+**Never tag an image `metheoryt/embedthat:*`.** The prod image tag is local-only
+(`embedthat:local`) on purpose: a registry tag would let Tugtainer pull-update the container
+out from under the local build and silently undo a deploy. For the same reason
+`.github/workflows/docker-publish.yml` is retired — `workflow_dispatch` only.
+
+Full runbook: `vps/homeserver/DEPLOYING-A-REPO.md`.
 
 ## Environment Setup
 
