@@ -20,9 +20,15 @@ docker compose up -d
 
 # Build the image locally (dev only — never tag it `metheoryt/embedthat:*`, see Deployment)
 docker build -t embedthat:dev .
+
+# Lint / type-check (no test suite exists)
+uv run ruff check .
+uv run pyright
 ```
 
-There is no test suite or linter configured.
+There is no test suite. Ruff (`E,F,I,UP,B,ANN`) and pyright are configured in
+`pyproject.toml` and installed in the dev group; both carry pre-existing debt, so
+the working gate is "no *new* findings versus baseline", not zero.
 
 ## Deployment
 
@@ -50,31 +56,91 @@ Full runbook: `vps/homeserver/DEPLOYING-A-REPO.md`.
 Copy `.env.dist` to `.env` and populate:
 - `BOT_TOKEN` — Telegram bot token (required)
 - `DUMP_CHAT_ID` — Telegram chat ID for temporary video storage (required); the bot sends videos here first to obtain Telegram `file_id`s for caching
-- `REDIS_URL` — Redis connection string (default: `redis://redis`)
-- `ADMIN_CHAT_ID` — optional
+- `REDIS_URL` — Redis connection string (default: `redis://redis`); also the dramatiq broker URL
+- `ADMIN_CHAT_ID` — optional; where CRITICAL log records are forwarded
+- `LOGLEVEL` — default `INFO`
+- `TZ` — timezone used for log timestamps and stats day boundaries
+- `ENABLE_AUDIO_TRANSLATION` — default **false**; YouTube audio translation is off unless set
+- `MAX_VIDEO_RESOLUTION` — default `480`
+- `MAX_PLAYLIST_TRACKS` — default `200`; an abuse guard on playlist *listing*, not on consumption (page downloads are lazy)
 
 ## Architecture
 
+### Two processes
+
+The bot is **not** a single process. `main.py` runs aiogram polling; a separate
+`worker` service runs `dramatiq bot.worker.actors --processes 1 --threads 4`.
+Redis is simultaneously the cache, the dramatiq broker, and the lock store.
+
+- `bot/handlers.py` serves cache hits inline and never downloads anything.
+- On a cache miss it registers a **waiter** (`bot/worker/waiters.py`) and, only if
+  it is the first waiter for that key, enqueues a dramatiq actor
+  (`bot/worker/actors.py`).
+- The worker downloads/merges/uploads (`bot/worker/pipeline.py`), then pops the
+  whole waiter list and fans the result out to every waiting chat.
+
 ### Request Flow
 
-1. User sends a social media link to the bot
-2. `bot/handlers.py` routes the message by detected `LinkOrigin`
-3. **Instagram/TikTok**: domain is rewritten to a proxy embedding service and sent back as a link
-4. **Twitter/X**: domain is replaced with fxtwitter.com / fixupx.com
-5. **YouTube**: full download-and-upload pipeline (see below)
-6. Signals in `bot/events/signals.py` trigger cross-cutting handlers (logging in `log.py`, usage counters in `stats.py`)
+1. User sends a link.
+2. **YouTube** (`youtube.com/watch|shorts`, `youtu.be`) matches its own handler and
+   goes through the YouTube pipeline below.
+3. **Everything else** — Instagram, TikTok, Twitter/X, Facebook, Reddit, … — falls
+   into the `embed_social` catch-all, which matches any `https?://` URL that is not
+   YouTube and downloads it with yt-dlp, re-encoding to iOS-compatible H.264/AAC and
+   re-uploading as a native Telegram video. There is no domain rewriting or proxy
+   embedding anywhere in the codebase.
+4. A link whose formats carry no video track (`vcodec == 'none'`) is classified as
+   **audio** and routed to the audio pipeline instead. Classification is generic —
+   never a domain allowlist — and costs one extra yt-dlp probe per uncached link.
+5. Signals in `bot/events/signals.py` trigger cross-cutting handlers (logging in
+   `log.py`, usage counters in `stats.py`).
 
 ### YouTube Pipeline (`bot/util/youtube/`)
 
 - `video.py` — main orchestration: selects best adaptive stream within Telegram's 50 MB limit, downloads video and audio separately, merges with FFmpeg, splits into ≤50 MB parts if needed (up to 10 parts)
 - `translate.py` — detects source language via Whisper (tiny model), translates audio using the `vot-cli` Node.js tool, mixes original (quieted) + translated audio with pydub
 - `schema.py` — `YouTubeVideoData` Pydantic model for cached video metadata
-- Redis caches processed `file_id`s to avoid re-downloading; Redis distributed locks prevent concurrent processing of the same video
+- Redis caches processed `file_id`s to avoid re-downloading; `HeartbeatLock`
+  (`bot/util/redis_lock.py`) prevents concurrent processing of the same video
+- An `aud:` inline button on the delivered video triggers audio-only extraction
+  (`process_youtube_audio`), cached on the same `yt:<id>` entry
+
+### Audio Pipeline (`bot/util/audio/`)
+
+- Handles audio-only links — SoundCloud, Bandcamp, Mixcloud, Audiomack, Yandex
+  Music. Spotify / Apple Music / Deezer are DRM-protected and out of scope.
+- Playlists are paginated at 10 tracks per page and delivered with an `apg:`
+  inline pager; a page turn deletes the old page and sends a new one, because
+  Telegram cannot edit a media group in place.
+- Two-tier cache: `da:<hash16>` holds the ordered track index (non-authoritative
+  for `file_id`s), `au:<extractor>:<id>` is the durable per-track dedup entry that
+  is never clobbered — the split self-heals last-write-wins races between pages.
+- A track over the 50 MB cap is **rejected**, not ffmpeg-split like video.
 
 ### Key Patterns
 
 - **Async throughout**: aiogram + asyncio; all I/O is non-blocking
-- **Event signals** (`aiosignal`): `on_link_received`, `on_link_sent`, `on_yt_video_sent`, `on_yt_video_fail` — used for logging and stats without coupling handlers
+- **Event signals** (`aiosignal`): `on_link_received`, `on_link_sent`,
+  `on_yt_video_sent`, `on_yt_video_fail`, `on_social_video_sent`,
+  `on_social_video_fail` — used for logging and stats without coupling handlers
+- **Per-process startup**: `freeze_signals()` and `install_admin_alert_handler()`
+  must run in *both* entrypoints (`main.py` and `bot/worker/__init__.py`) — the two
+  processes share no startup path. Each actor invocation runs its own
+  `asyncio.run()`, so actor-side code must open a short-lived Redis client instead
+  of reusing the module-level `redis_client` singleton (which binds to the first
+  event loop)
+- **Waiter fan-out**: cache keys are global rather than per-chat, so requesters
+  `RPUSH` a `Waiter` onto the key's list and a returned length of `1` is the
+  race-free "am I first" test — no lock needed to decide who enqueues the job
+- **Error classification**: every routine, user-facing exception an actor can raise
+  is listed in that actor's `throws=` tuple, which skips both the retries and
+  `on_retry_exhausted` — so a bad link reaches the user as a reason instead of
+  paging the admin. Telegram admin alerts fire on `log.critical` only, deliberately:
+  WARNING/ERROR mark routine conditions (ack races, ffprobe fallbacks, per-attempt
+  retries)
+- **Multi-part delivery**: `sendMediaGroup` accepts no `reply_markup`, so split
+  videos and multi-track audio pages must carry their buttons/footer in a separate
+  follow-up message; only single-item sends can collapse to one message
 - **Dump chat pattern**: videos are sent to `DUMP_CHAT_ID` to obtain a stable Telegram `file_id`, then forwarded to the user; cached `file_id`s allow instant resend on repeat requests
 - **Config** via `pydantic-settings` in `bot/config.py`; `settings` singleton imported throughout
 
