@@ -10,7 +10,7 @@ log = logging.getLogger(__name__)
 
 
 @signal_handler(on_link_received)
-async def log_link(message: Message, origin: LinkOrigin):
+async def log_link(message: Message, origin: LinkOrigin) -> None:
     log.info(
         "%s link in %s from %s @%s: %s",
         origin,

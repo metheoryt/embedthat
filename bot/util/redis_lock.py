@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from types import TracebackType
 
 from redis.asyncio.lock import Lock
 
@@ -18,7 +19,7 @@ class HeartbeatLock:
     the TTL well before it would expire, so long-running work stays covered.
     """
 
-    def __init__(self, lock: Lock, interval: float | None = None):
+    def __init__(self, lock: Lock, interval: float | None = None) -> None:
         self._lock = lock
         self._interval = interval or max(lock.timeout / 3, 0.1)
         self._task: asyncio.Task | None = None
@@ -28,15 +29,21 @@ class HeartbeatLock:
         self._task = asyncio.create_task(self._heartbeat())
         return self
 
-    async def __aexit__(self, exc_type, exc, tb):
-        self._task.cancel()
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        if self._task is not None:
+            self._task.cancel()
         try:
             await self._task
         except asyncio.CancelledError:
             pass
         await self._lock.__aexit__(exc_type, exc, tb)
 
-    async def _heartbeat(self):
+    async def _heartbeat(self) -> None:
         try:
             while True:
                 await asyncio.sleep(self._interval)

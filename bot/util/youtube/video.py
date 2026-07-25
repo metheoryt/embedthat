@@ -41,7 +41,7 @@ def get_resolution(stream: Stream) -> tuple[int, int]:
 
 
 @translates_youtube_errors
-def get_audio_stream(video: YouTubeVideoData, output_path: Path):
+def get_audio_stream(video: YouTubeVideoData, output_path: Path) -> str | Path:
     audio_streams = video.yt.streams.filter(file_extension='mp4', only_audio=True).order_by('abr').desc()
     log.info('adaptive audio streams: %s', audio_streams)
     audio_stream = audio_streams.first()
@@ -51,6 +51,10 @@ def get_audio_stream(video: YouTubeVideoData, output_path: Path):
 
     log.info('downloading audio stream')
     audio_stream_path = audio_stream.download(output_path=str(output_path), filename=f'{video.yt.video_id}.audio.mp4')
+    if not audio_stream_path:
+        # download() returns None only on an interrupt_checker abort, which we never pass;
+        # make the impossible case a domain error instead of a TypeError in the caller
+        raise YouTubeError('audio stream download returned no path')
 
     if settings.enable_audio_translation and video.target_lang != TargetLang.ORIGINAL:
         log.info('trying to translate audio stream to %s', video.target_lang)
@@ -70,7 +74,12 @@ def pick_stream(
     audio_stream_path = get_audio_stream(video, output_path)
     audio_size = Path(audio_stream_path).stat().st_size
 
-    video_streams = video.yt.streams.filter(file_extension='mp4', subtype='mp4', only_video=True).order_by('resolution').desc()
+    video_streams = (
+        video.yt.streams
+        .filter(file_extension='mp4', subtype='mp4', only_video=True)
+        .order_by('resolution')
+        .desc()
+    )
     # filter only supported streams
     video_streams = [
         s for s in video_streams if
@@ -131,7 +140,9 @@ def pick_stream(
 
             log.info('%s size %dMb', video_stream_path, video_stream_path.stat().st_size // 1024 // 1024)
             # merge A+V and recheck the total size
-            merged_stream_filename = Path(f'{video.yt.video_id}.{stream.resolution}.{stream.codecs[0]}.{video.target_lang}.mp4')
+            merged_stream_filename = Path(
+                f'{video.yt.video_id}.{stream.resolution}.{stream.codecs[0]}.{video.target_lang}.mp4'
+            )
             merged_stream_path = output_path / merged_stream_filename
             if not merged_stream_path.exists():
                 log.info('merging %s and %s', video_stream_path, audio_stream_path)

@@ -71,7 +71,9 @@ async def _pop_waiters(redis_client: redis.Redis, cache_key: str) -> list[Waiter
     return deduped
 
 
-async def _notify_waiters_success(bot: Bot, waiters: list[Waiter], video) -> None:
+async def _notify_waiters_success(
+    bot: Bot, waiters: list[Waiter], video: YouTubeVideoData | SocialVideoData
+) -> None:
     for waiter in waiters:
         await _safe_delete_ack(bot, waiter.chat_id, waiter.ack_message_id)
         await video.send_to_chat(bot, waiter.chat_id, reply_to_message_id=waiter.reply_to_message_id)
@@ -163,7 +165,7 @@ async def _process_youtube_link_async(bot: Bot, chat_id: int, link: str, target_
     throws=(YouTubeError,),
     on_retry_exhausted="report_actor_failure",
 )
-def process_youtube_link(chat_id: int, link: str, target_lang: str):
+def process_youtube_link(chat_id: int, link: str, target_lang: str) -> None:
     bot = Bot(token=settings.bot_token)
     try:
         asyncio.run(_process_youtube_link_async(bot, chat_id, link, target_lang))
@@ -238,7 +240,7 @@ async def _process_youtube_audio_async(bot: Bot, chat_id: int, video_id: str, re
     throws=(YouTubeError,),
     on_retry_exhausted="report_actor_failure",
 )
-def process_youtube_audio(chat_id: int, video_id: str, reply_to_message_id: int):
+def process_youtube_audio(chat_id: int, video_id: str, reply_to_message_id: int) -> None:
     bot = Bot(token=settings.bot_token)
     try:
         asyncio.run(_process_youtube_audio_async(bot, chat_id, video_id, reply_to_message_id))
@@ -303,7 +305,7 @@ async def _process_social_link_async(bot: Bot, chat_id: int, url: str) -> None:
     throws=(SocialDownloadError, AudioDownloadError),
     on_retry_exhausted="report_actor_failure",
 )
-def process_social_link(chat_id: int, url: str):
+def process_social_link(chat_id: int, url: str) -> None:
     bot = Bot(token=settings.bot_token)
     try:
         asyncio.run(_process_social_link_async(bot, chat_id, url))
@@ -350,7 +352,7 @@ async def _process_audio_page_async(bot: Bot, chat_id: int, hash16: str, page: i
     throws=(AudioDownloadError,),
     on_retry_exhausted="report_actor_failure",
 )
-def process_audio_page(chat_id: int, hash16: str, page: int):
+def process_audio_page(chat_id: int, hash16: str, page: int) -> None:
     bot = Bot(token=settings.bot_token)
     try:
         asyncio.run(_process_audio_page_async(bot, chat_id, hash16, page))

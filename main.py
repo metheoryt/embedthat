@@ -11,7 +11,7 @@ from bot.events import freeze_signals
 from bot.util.telegram_log_handler import install_admin_alert_handler
 
 
-async def main():
+async def main() -> None:
     from bot import handlers  # noqa
 
     the_bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode="HTML"))
@@ -26,7 +26,7 @@ async def main():
     await dp.start_polling(the_bot)
 
 
-def setup():
+def setup() -> None:
     load_dotenv()
     logging.basicConfig(
         level=getattr(logging, settings.loglevel),

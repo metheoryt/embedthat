@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     def timezone(self) -> ZoneInfo:
         return ZoneInfo(self.tz or "UTC")
 
-    def now(self):
+    def now(self) -> datetime:
         return datetime.now(self.timezone)
 
 

@@ -37,7 +37,7 @@ _SOCIAL_WAITERS_TTL = 90 * 60  # ~1.5h
 
 
 @router.error()
-async def error_handler(event: ErrorEvent):
+async def error_handler(event: ErrorEvent) -> None:
     message = event.update.message
     log.critical(
         "Unhandled error while processing update (message text: %r)",
@@ -47,7 +47,7 @@ async def error_handler(event: ErrorEvent):
 
 
 @router.message(CommandStart())
-async def start(message: types.Message):
+async def start(message: types.Message) -> None:
     log.info(
         "/start in %s %r (chat id=%s)",
         message.chat.type,
@@ -69,7 +69,7 @@ async def start_channel(message: types.Message) -> None:
 
 
 @router.message(Command("stats"))
-async def cmd_stats(message: types.Message):
+async def cmd_stats(message: types.Message) -> None:
     if not settings.admin_chat_id or message.chat.id != settings.admin_chat_id:
         return
     await message.reply(await build_stats_report())
@@ -78,7 +78,7 @@ async def cmd_stats(message: types.Message):
 @router.message(
     F.text.regexp(r"^https://(((www|m)\.)?youtube\.com/(watch|shorts/)|youtu\.be/)")
 )
-async def embed_youtube_videos(message: types.Message):
+async def embed_youtube_videos(message: types.Message) -> None:
     await on_link_received.send(message, LinkOrigin.YOUTUBE)
     link = message.text.split()[0]  # as regex states, we expect the first element in the text to be a link
 
@@ -121,7 +121,7 @@ async def embed_youtube_videos(message: types.Message):
 
 
 @router.callback_query(F.data.startswith("aud:"))
-async def get_audio(callback: types.CallbackQuery):
+async def get_audio(callback: types.CallbackQuery) -> None:
     await callback.answer()
     if not isinstance(callback.message, types.Message):
         return
@@ -166,12 +166,12 @@ async def get_audio(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data == "apg:noop")
-async def noop_page_indicator(callback: types.CallbackQuery):
+async def noop_page_indicator(callback: types.CallbackQuery) -> None:
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("apg:"))
-async def get_audio_page(callback: types.CallbackQuery):
+async def get_audio_page(callback: types.CallbackQuery) -> None:
     await callback.answer()
     if not isinstance(callback.message, types.Message):
         return
@@ -247,7 +247,7 @@ async def _process_social_url(message: Message, url: str) -> None:
 
 
 @router.message(F.text.regexp(r"https?://"))
-async def embed_social(message: types.Message):
+async def embed_social(message: types.Message) -> None:
     urls = [u for u in _URL_RE.findall(message.text) if not _YOUTUBE_URL_RE.match(u)]
     if not urls:
         return

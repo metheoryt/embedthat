@@ -1,7 +1,10 @@
 import redis.asyncio as redis
+from aiogram import Bot
+from aiogram.types import Message
 from redis.asyncio import Redis
 
 from bot.config import settings
+from bot.enum import LinkOrigin
 from bot.events.signals import (
     on_link_received,
     on_social_video_fail,
@@ -11,6 +14,8 @@ from bot.events.signals import (
     signal_handler,
 )
 from bot.util.redis import redis_client
+from bot.util.social.schema import SocialVideoData
+from bot.util.youtube.schema import YouTubeVideoData
 
 _TTL = 90 * 24 * 3600  # 90 days
 
@@ -30,7 +35,7 @@ async def _sadd(client: Redis, key: str, value: str) -> None:
 
 
 @signal_handler(on_link_received)
-async def stats_link_received(message, origin):
+async def stats_link_received(message: Message, origin: LinkOrigin) -> None:
     # Only ever fired from the aiogram process's own persistent event loop,
     # so the shared singleton is safe here (unlike the four handlers below).
     if not message.from_user:
@@ -52,7 +57,14 @@ async def stats_link_received(message, origin):
 
 
 @signal_handler(on_yt_video_sent)
-async def stats_yt_sent(link, chat_id, chat_type, bot, video, fresh):
+async def stats_yt_sent(
+    link: str,
+    chat_id: int,
+    chat_type: str,
+    bot: Bot,
+    video: YouTubeVideoData,
+    fresh: bool,
+) -> None:
     client = redis.from_url(str(settings.redis_dsn), decode_responses=True)
     try:
         await _incr(client, f"stats:{_today()}:success:youtube")
@@ -61,7 +73,14 @@ async def stats_yt_sent(link, chat_id, chat_type, bot, video, fresh):
 
 
 @signal_handler(on_social_video_sent)
-async def stats_social_sent(link, chat_id, chat_type, bot, video, fresh):
+async def stats_social_sent(
+    link: str,
+    chat_id: int,
+    chat_type: str,
+    bot: Bot,
+    video: SocialVideoData,
+    fresh: bool,
+) -> None:
     client = redis.from_url(str(settings.redis_dsn), decode_responses=True)
     try:
         platform = (video.origin or "social").lower()
@@ -71,7 +90,7 @@ async def stats_social_sent(link, chat_id, chat_type, bot, video, fresh):
 
 
 @signal_handler(on_yt_video_fail)
-async def stats_yt_fail(link):
+async def stats_yt_fail(link: str) -> None:
     client = redis.from_url(str(settings.redis_dsn), decode_responses=True)
     try:
         await _incr(client, f"stats:{_today()}:fail:youtube")
@@ -80,7 +99,7 @@ async def stats_yt_fail(link):
 
 
 @signal_handler(on_social_video_fail)
-async def stats_social_fail(link):
+async def stats_social_fail(link: str) -> None:
     client = redis.from_url(str(settings.redis_dsn), decode_responses=True)
     try:
         await _incr(client, f"stats:{_today()}:fail:social")

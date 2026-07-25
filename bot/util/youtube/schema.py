@@ -45,7 +45,7 @@ class YouTubeVideoData(BaseModel):
     length: int | None = None
 
     @cached_property
-    def yt(self):
+    def yt(self) -> YouTube:
         # https://github.com/JuanBindez/pytubefix/pull/209
         # return YouTube(self.link, "WEB")
         return YouTube(self.link)
@@ -88,11 +88,11 @@ class YouTubeVideoData(BaseModel):
         return True
 
     @property
-    def cache_key(self):
+    def cache_key(self) -> str:
         return f"yt:{self.yt.video_id}"
 
     @property
-    def caption(self):
+    def caption(self) -> str:
         # title is empty only for pre-metadata entries YouTube won't describe any
         # more; drop the line entirely rather than lead the caption with a blank one
         title = self.title or ''
@@ -101,7 +101,7 @@ class YouTubeVideoData(BaseModel):
         return f"{title}\n{self.link}\n" if title else f"{self.link}\n"
 
     @property
-    def media_group(self):
+    def media_group(self) -> list[types.InputMediaVideo]:
         the_group = [
             types.InputMediaVideo(
                 media=file_id,
@@ -121,7 +121,7 @@ class YouTubeVideoData(BaseModel):
             ]]
         )
 
-    async def send_to_chat(self, bot: Bot, chat_id: int, reply_to_message_id: int | None = None):
+    async def send_to_chat(self, bot: Bot, chat_id: int, reply_to_message_id: int | None = None) -> None:
         if len(self.file_ids) > 1:
             # send_media_group doesn't support reply_markup, so the button has to ride a follow-up message
             await bot.send_media_group(chat_id, self.media_group, reply_to_message_id=reply_to_message_id)
@@ -137,7 +137,7 @@ class YouTubeVideoData(BaseModel):
                 reply_markup=self.audio_button_markup,
             )
 
-    async def reply_to(self, message: types.Message):
+    async def reply_to(self, message: types.Message) -> None:
         if len(self.file_ids) > 1:
             await message.reply_media_group(self.media_group)
             await message.reply("🎵 Want just the audio?", reply_markup=self.audio_button_markup)

@@ -1,15 +1,20 @@
+from collections.abc import Callable
+from typing import Any, TypeVar
+
 from aiosignal import Signal
 
+F = TypeVar("F", bound=Callable[..., Any])
 
-def signal_handler(signal: Signal):
-    def decorator(func):
+
+def signal_handler(signal: Signal) -> Callable[[F], F]:
+    def decorator(func: F) -> F:
         signal.append(func)
         return func
 
     return decorator
 
 
-def freeze_signals():
+def freeze_signals() -> None:
     for sig in [
         on_link_received, on_link_sent,
         on_yt_video_sent, on_yt_video_fail,

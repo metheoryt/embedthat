@@ -118,7 +118,7 @@ def mix_audio(
     original_audio_path: str,
     translated_audio_path: str,
     output_path: str,
-    original_volume_db=-10,
+    original_volume_db: int = -10,
 ) -> None:
     """
     Mixes two audio files: the original and the translated, with the original being quieter.

@@ -6,16 +6,16 @@ from aiogram.enums import ChatAction
 
 log = logging.getLogger(__name__)
 
-chat_action_tasks = {}
+chat_action_tasks: dict[int, asyncio.Task[None]] = {}
 
-async def send_chat_action_periodically(bot: Bot, chat_id: int, action: ChatAction):
+async def send_chat_action_periodically(bot: Bot, chat_id: int, action: ChatAction) -> asyncio.Task[None]:
     # Check if there's already an action being sent for this chat_id
     if chat_id in chat_action_tasks:
         # If there's an active task, cancel it
         log.debug('cancelling %d chat action task due to the new task', chat_id)
         chat_action_tasks[chat_id].cancel()
 
-    async def action_task():
+    async def action_task() -> None:
         try:
             while True:
                 log.debug('sending %d chat action %s', chat_id, action)

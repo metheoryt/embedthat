@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 import redis.asyncio as redis
 
@@ -13,6 +14,6 @@ redis_client: redis.Redis = redis.from_url(
 
 
 @dp.shutdown()
-async def on_shutdown(*args, **kwargs):
+async def on_shutdown(*args: Any, **kwargs: Any) -> None:
     await redis_client.aclose()
     log.info("redis client has been closed")
