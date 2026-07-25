@@ -1,6 +1,6 @@
 [project]
 name = "embedthat"
-version = "0.4.9"
+version = "0.4.10"
 description = "Embed links from social media and youtube into telegram"
 requires-python = ">=3.12"
 dependencies = [
@@ -14,7 +14,7 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "pytubefix>=10.0.0",
     "redis[hiredis]>=5.2.1",
-    "yt-dlp>=2026.3.17",
+    "yt-dlp>=2026.7.4",
 ]
 
 [tool.pyright]
