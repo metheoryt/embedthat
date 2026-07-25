@@ -1,4 +1,4 @@
-<!-- KB refreshed against b5bbefb on 2026-07-25 -->
+<!-- KB refreshed against a8284b3 on 2026-07-26 -->
 
 # Project memory — embedthat
 
@@ -115,7 +115,10 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
 - Audio-vs-video is classified generically in the worker (no format with
   `vcodec != 'none'`), never by a domain allowlist — nothing can know before
   yt-dlp probes. Accepted cost: a second yt-dlp round-trip on every uncached
-  non-YouTube link, plus a new pre-download failure surface.
+  non-YouTube link, plus a new pre-download failure surface. The probe facts this
+  rests on — flat entries carry no `formats`/`vcodec`, `extract_info()` returns
+  `None` instead of raising, per-extractor entry shapes — are in
+  [`docs/yt-dlp-probe-behavior.md`](../../docs/yt-dlp-probe-behavior.md).
 - The audio delivery branch returns before emitting `on_social_video_sent`, so
   the signal-driven logging/stats consumers undercount audio traffic — a known
   consequence of the design, not an oversight.
@@ -158,7 +161,10 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
 
 - **`AGENTS.md` is a hand-synced twin of `CLAUDE.md`** — a real file, not a
   symlink, byte-identical except the header line (it is the Codex-facing
-  counterpart). Mirror every `CLAUDE.md` edit into it in the same commit.
+  counterpart). Mirror every `CLAUDE.md` edit into it in the same commit — resync
+  it mechanically rather than by hand-editing twice:
+  `{ head -3 AGENTS.md; tail -n +4 CLAUDE.md; } > .agents.new && mv .agents.new AGENTS.md`,
+  then verify with `diff <(tail -n +4 AGENTS.md) <(tail -n +4 CLAUDE.md)`.
 - Feature work commits both artifacts to git before any code: a design spec in
   `docs/superpowers/specs/YYYY-MM-DD-*.md`, then a task-by-task implementation
   plan in `docs/superpowers/plans/YYYY-MM-DD-*.md`.

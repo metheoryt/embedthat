@@ -1,4 +1,42 @@
 {
+  "last_refresh": {
+    "commit": "a8284b3e71efae13ab9f5e460b524b28261d9397",
+    "date": "2026-07-26",
+    "tiers_touched": [
+      ".claude/memory/project.md",
+      "docs/yt-dlp-probe-behavior.md",
+      "agents/memory/global.md"
+    ],
+    "sessions_processed": [
+      "0e7c1afc-0ecc-4a6f-8ee0-94c48520a76c",
+      "16db0dfc-cfb5-42ef-b100-c74d7bedf037",
+      "1a7117e4-5c12-49c6-a304-beead90d6cb8",
+      "1ea52f75-1371-411b-9ac0-9c6bac9babab",
+      "2c67648c-5d43-422a-b162-f3bd885b1e15",
+      "35f02c43-fb8c-4658-a3c1-836952eca8a8",
+      "3df5940f-9b99-4869-8878-fb6f5014a7c8",
+      "4593415b-505b-48c4-8e03-e583ad384ba7",
+      "52f71bb7-19a3-4255-af3d-420669690848",
+      "649b910a-b0ae-44d0-a82e-a18cb2a5b30c",
+      "65a22ca9-f503-4214-a971-a8b90754afc9",
+      "661762a0-e240-465e-8993-fff5803afe4f",
+      "6cacebba-48b1-4946-bd68-27b47077b124",
+      "74a3f212-360e-406d-96fd-88ab87455805",
+      "762a3c67-7c6d-4d0a-9531-8b4490f4c0b6",
+      "8b0dea9f-0b10-49fa-bf5c-b81839d9fa53",
+      "8c75b0cc-8b0e-4766-af4d-e4131543d489",
+      "97838d9d-c447-4947-b880-2ffc95e6a2af",
+      "97aaedc0-88dc-42d2-b232-f4016fcb4244",
+      "b293763a-e99f-497f-9e47-fd183ed404c2",
+      "bdd86c4a-c583-4811-b35e-ffffad69838d",
+      "c380df19-a6bd-4594-9325-d1ae5c5bb91c",
+      "dcbd3f90-7cfc-4499-9d29-d0c0098e673c",
+      "dd113f6a-1141-4b15-87d3-2588c2a288cb",
+      "e29a9b61-cff0-4e0d-bff4-25582c2592f5",
+      "ef3596cf-83a1-4de5-821f-9092f059f1bb",
+      "fc1b7c7b-dbbf-420a-b3bb-0badf7732a9e"
+    ]
+  },
   "sessions": {
     "0e7c1afc-0ecc-4a6f-8ee0-94c48520a76c": {
       "cwd": "/home/me/orca/workspaces/embedthat/instagram-fix",
@@ -11,8 +49,8 @@
       "cwd": "/home/me/orca/workspaces/embedthat/refresh-kb",
       "host": "g614jv",
       "id_hash": "d95f5f4c41991d0c15a8e6388677ac30e1b3d3b9",
-      "last_line": 57,
-      "last_ts": "2026-07-25T15:43:45.518Z"
+      "last_line": 316,
+      "last_ts": "2026-07-25T18:33:49.626Z"
     },
     "1a7117e4-5c12-49c6-a304-beead90d6cb8": {
       "cwd": "C:\\Users\\methe\\orca\\workspaces\\vps\\embedthat-fixes",
@@ -41,6 +79,13 @@
       "id_hash": "94f72b444cd3a92e73764e594ae2e1b36cd251c7",
       "last_line": 11,
       "last_ts": "2026-07-04T00:56:19.304Z"
+    },
+    "3df5940f-9b99-4869-8878-fb6f5014a7c8": {
+      "cwd": "/home/me/orca/workspaces/embedthat/refresh-kb",
+      "host": "g614jv",
+      "id_hash": "14997dfb1bebef4c2410b9429502954bcb31a33b",
+      "last_line": 45,
+      "last_ts": "2026-07-25T18:56:17.374Z"
     },
     "4593415b-505b-48c4-8e03-e583ad384ba7": {
       "cwd": "C:\\Users\\methe\\GitHub\\embedthat-bot",
@@ -182,45 +227,5 @@
       "last_line": 1072,
       "last_ts": "2026-07-03T20:13:17.160Z"
     }
-  },
-  "last_refresh": {
-    "commit": "b5bbefb8cff4838be3f8653e2015ab4e3f79db8f",
-    "date": "2026-07-25",
-    "tiers_touched": [
-      "CLAUDE.md",
-      "AGENTS.md",
-      ".claude/memory/project.md",
-      "agents/memory/global.md",
-      "agents/hosts/g614jv.md",
-      "agents/hosts/g513ie.md"
-    ],
-    "sessions_processed": [
-      "0e7c1afc-0ecc-4a6f-8ee0-94c48520a76c",
-      "16db0dfc-cfb5-42ef-b100-c74d7bedf037",
-      "1a7117e4-5c12-49c6-a304-beead90d6cb8",
-      "1ea52f75-1371-411b-9ac0-9c6bac9babab",
-      "2c67648c-5d43-422a-b162-f3bd885b1e15",
-      "35f02c43-fb8c-4658-a3c1-836952eca8a8",
-      "4593415b-505b-48c4-8e03-e583ad384ba7",
-      "52f71bb7-19a3-4255-af3d-420669690848",
-      "649b910a-b0ae-44d0-a82e-a18cb2a5b30c",
-      "65a22ca9-f503-4214-a971-a8b90754afc9",
-      "661762a0-e240-465e-8993-fff5803afe4f",
-      "6cacebba-48b1-4946-bd68-27b47077b124",
-      "74a3f212-360e-406d-96fd-88ab87455805",
-      "762a3c67-7c6d-4d0a-9531-8b4490f4c0b6",
-      "8b0dea9f-0b10-49fa-bf5c-b81839d9fa53",
-      "8c75b0cc-8b0e-4766-af4d-e4131543d489",
-      "97838d9d-c447-4947-b880-2ffc95e6a2af",
-      "97aaedc0-88dc-42d2-b232-f4016fcb4244",
-      "b293763a-e99f-497f-9e47-fd183ed404c2",
-      "bdd86c4a-c583-4811-b35e-ffffad69838d",
-      "c380df19-a6bd-4594-9325-d1ae5c5bb91c",
-      "dcbd3f90-7cfc-4499-9d29-d0c0098e673c",
-      "dd113f6a-1141-4b15-87d3-2588c2a288cb",
-      "e29a9b61-cff0-4e0d-bff4-25582c2592f5",
-      "ef3596cf-83a1-4de5-821f-9092f059f1bb",
-      "fc1b7c7b-dbbf-420a-b3bb-0badf7732a9e"
-    ]
   }
 }
