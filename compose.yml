@@ -1,6 +1,6 @@
 services:
     bot:
-        image: metheoryt/embedthat:latest
+        image: embedthat:dev
         build: .
         env_file:
             - .env
@@ -9,7 +9,7 @@ services:
             - bot_venv:/app/.venv
         restart: unless-stopped
     worker:
-        image: metheoryt/embedthat:latest
+        image: embedthat:dev
         build: .
         env_file:
             - .env

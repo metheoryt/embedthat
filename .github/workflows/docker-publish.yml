@@ -1,9 +1,12 @@
 name: Docker Publish
 
 # Retired as the delivery path: embedthat now deploys via the homeserver
-# local poll-and-build pipeline (vps/homeserver/deploy-embedthat.ps1 builds
-# embedthat:local from a git submodule). This workflow no longer runs on push;
+# config-driven poll-and-build pipeline (the `repos-deploy` task runs
+# vps/homeserver/deploy-repos.ps1, which builds embedthat:local from a gitignored
+# clone at vps/homeserver/embedthat/src). This workflow no longer runs on push;
 # it stays available for manual one-off publishes only (workflow_dispatch).
+# Publishing metheoryt/embedthat:latest lets Tugtainer pull-update over the
+# locally built prod container — only dispatch it if you mean exactly that.
 on:
   workflow_dispatch:
 

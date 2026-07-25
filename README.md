@@ -58,11 +58,25 @@ uv run main.py
 docker compose up -d
 ```
 
-**Build Docker image:**
+**Build Docker image** (dev only — never tag it `metheoryt/embedthat:*`, see Deployment):
 
 ```bash
-docker build -t metheoryt/embedthat:latest .
+docker build -t embedthat:dev .
 ```
+
+## Deployment
+
+Production runs on the homeserver through the config-driven poll-and-build pipeline owned by
+the `vps` repo — no registry, no CI publish. **Pushing to `main` is the deploy**: the
+`repos-deploy` scheduled task (`vps/homeserver/deploy-repos.ps1`, every 3 minutes) fetches
+this repo into a gitignored clone, rebuilds the image locally as `embedthat:local`, and
+recreates the stack from `vps/homeserver/embedthat/compose.prod.yml`.
+
+Never tag an image `metheoryt/embedthat:*` — a registry tag would let Tugtainer pull-update
+the container out from under the local build. `.github/workflows/docker-publish.yml` is
+retired for the same reason (`workflow_dispatch` only).
+
+Runbook: `vps/homeserver/DEPLOYING-A-REPO.md`.
 
 ## How It Works
 
