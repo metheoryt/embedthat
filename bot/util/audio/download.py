@@ -8,6 +8,7 @@ from yt_dlp.utils import DownloadError
 
 from bot.config import settings
 from bot.util.youtube.video import MAX_FILE_SIZE_BYTES
+from bot.util.ytdlp import cookie_opts
 
 from .exc import AudioDownloadError
 from .schema import AudioTrackData
@@ -21,7 +22,7 @@ def _is_audio_only(info: dict) -> bool:
 
 
 def _deep_probe(url: str) -> dict:
-    opts: Any = {"quiet": True, "skip_download": True, "noplaylist": True}
+    opts: Any = {"quiet": True, "skip_download": True, "noplaylist": True, **cookie_opts()}
     with yt_dlp.YoutubeDL(opts) as ydl:
         try:
             info = ydl.extract_info(url, download=False)
@@ -38,7 +39,10 @@ def probe_link(url: str) -> tuple[bool, list[AudioTrackData]]:
 
     Synchronous/blocking -- call via asyncio.to_thread.
     """
-    opts: Any = {"quiet": True, "skip_download": True, "extract_flat": "in_playlist", "noplaylist": False}
+    opts: Any = {
+        "quiet": True, "skip_download": True, "extract_flat": "in_playlist", "noplaylist": False,
+        **cookie_opts(),
+    }
     with yt_dlp.YoutubeDL(opts) as ydl:
         try:
             info = ydl.extract_info(url, download=False)
@@ -104,6 +108,7 @@ def download_track(track: AudioTrackData, output_dir: Path) -> Path:
         "format": "bestaudio/best",
         "quiet": True,
         "noplaylist": True,
+        **cookie_opts(),
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:

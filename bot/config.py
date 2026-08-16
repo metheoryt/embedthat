@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from pydantic import AliasChoices, Field, RedisDsn
@@ -22,6 +23,12 @@ class Settings(BaseSettings):
     enable_audio_translation: bool = False
     max_video_resolution: int = 480
     max_playlist_tracks: int = 200
+
+    # Netscape-format cookie jar handed to yt-dlp, unlocking posts that require a
+    # logged-in session (Instagram reels, age/sensitivity-gated TikToks). Optional:
+    # unset means no cookies, which is exactly the pre-cookie behaviour. Must be
+    # writable -- yt-dlp saves the refreshed jar back on close.
+    cookies_file: Path | None = None
 
     # populated on setup
     bot_username: str | None = None

@@ -43,6 +43,7 @@ Live at: https://t.me/embedthat_bot
 | `LOGLEVEL`        | No       | Log level (default: `INFO`)                                                         |
 | `TZ`              | No       | Timezone for log timestamps (default: `Asia/Almaty`)                                |
 | `ADMIN_CHAT_ID`   | No       | Admin chat for error notifications                                                  |
+| `COOKIES_FILE`    | No       | Path to a writable Netscape `cookies.txt` for yt-dlp; unlocks login-walled posts    |
 
 ## Running
 

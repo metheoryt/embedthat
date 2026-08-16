@@ -24,6 +24,7 @@ from bot.util.youtube.enum import TargetLang
 from bot.util.youtube.exc import YouTubeError
 from bot.util.youtube.schema import YouTubeVideoData
 from bot.util.youtube.video import get_audio_stream
+from bot.util.ytdlp import is_login_wall
 from bot.worker.broker import (
     broker,  # noqa: F401 -- registers the Redis broker before actors are declared
 )
@@ -39,6 +40,34 @@ from bot.worker.pipeline import (
 from bot.worker.waiters import Waiter, pop_waiters
 
 log = logging.getLogger(__name__)
+
+_COOKIE_ALERT_KEY = "cookies:stale-alerted"
+_COOKIE_ALERT_TTL = 24 * 60 * 60
+
+
+async def _alert_if_cookies_stale(redis_client: redis.Redis, url: str, error: Exception) -> None:
+    """Raise a CRITICAL -- and so an admin-chat message -- when a login wall is
+    hit *while cookies are configured*, which means the jar has gone stale
+    (expired, or the account was challenged) and needs re-exporting.
+
+    Silent when no cookies are configured: a login wall is then just a link we
+    were never going to be able to fetch, and says nothing a human can act on.
+
+    Rate-limited to one alert per day via a Redis NX+TTL key, because legitimately
+    private posts raise the same error and would otherwise flood the chat --
+    the exact failure mode the CRITICAL-only threshold exists to prevent.
+    Cannot ride on `report_actor_failure`: these actors list both download
+    errors in `throws`, so dramatiq's Retries middleware never invokes it.
+    """
+    if not settings.cookies_file or not is_login_wall(error):
+        return
+    if not await redis_client.set(_COOKIE_ALERT_KEY, "1", ex=_COOKIE_ALERT_TTL, nx=True):
+        return
+    log.critical(
+        "login wall hit while cookies ARE configured (%s) -- the cookie jar has most "
+        "likely gone stale; re-export it. Further cookie alerts suppressed for 24h.\nlink: %s\n%s",
+        settings.cookies_file, url, error,
+    )
 
 
 async def _safe_edit_ack(bot: Bot, chat_id: int, message_id: int | None, text: str) -> None:
@@ -261,6 +290,7 @@ async def _process_social_link_async(bot: Bot, chat_id: int, url: str) -> None:
             except AudioDownloadError as e:
                 waiters = await _pop_waiters(redis_client, video.cache_key)
                 await _notify_waiters_failure(bot, waiters, f"❌ Couldn't process this link: {e}")
+                await _alert_if_cookies_stale(redis_client, url, e)
                 raise
 
             if is_audio:
@@ -284,6 +314,7 @@ async def _process_social_link_async(bot: Bot, chat_id: int, url: str) -> None:
             except SocialDownloadError as e:
                 waiters = await _pop_waiters(redis_client, video.cache_key)
                 await _notify_waiters_failure(bot, waiters, f"❌ Couldn't download this video: {e}")
+                await _alert_if_cookies_stale(redis_client, url, e)
                 raise
 
             await redis_client.set(video.cache_key, video.model_dump_json())

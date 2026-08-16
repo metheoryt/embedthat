@@ -6,6 +6,7 @@ import ffmpeg
 import yt_dlp
 
 from bot.config import settings
+from bot.util.ytdlp import cookie_opts
 
 from .exc import SocialDownloadError
 
@@ -49,6 +50,7 @@ def download_social_video(url: str, output_dir: Path, max_res: int = settings.ma
     Raises SocialDownloadError for unrecoverable failures (private/removed/geo-blocked).
     """
     ydl_opts = {
+        **cookie_opts(),
         "outtmpl": str(output_dir / "%(id)s.%(ext)s"),
         "format": (
             f"worstvideo[ext=mp4][height>={max_res}]+bestaudio[ext=m4a]/"
