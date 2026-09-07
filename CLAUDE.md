@@ -32,10 +32,16 @@ the working gate is "no *new* findings versus baseline", not zero.
 
 ## Deployment
 
-Production runs on **`latitude`** (`latitude5520`, Linux) — reachable over the tailnet at
-`100.64.0.8`; the `latitude` SSH alias currently fails with *no route to host*, so use the IP.
-The stack lives at `~/my/vps/homeserver/embedthat/` there, built locally from a gitignored
-clone at `src/` — no registry, no CI publish.
+Production runs on **`latitude`** (`latitude5520`, Linux). The stack lives at
+`~/my/vps/homeserver/embedthat/` there, built locally from a gitignored clone at `src/` —
+no registry, no CI publish.
+
+**Reach it as `latitude.gg.ez`, not bare `latitude`.** `/etc/resolv.conf` on the WSL boxes
+carries `search lan gg.ez` in that order, so the bare name resolves through the router's
+`.lan` zone (`latitude.lan` = `192.168.8.154`) and dies with *no route to host* from anywhere
+off that LAN — the tailnet name is never tried. The MagicDNS FQDN skips the search list.
+Same trap for `air`; `g15`/`hub`/`desktop-wsl` are unaffected only because the router has no
+`.lan` record for them.
 
 **Pushing to `main` is NOT the deploy on this host.** The config-driven poll-and-build
 pipeline in the `vps` repo (`deploy-repos.ps1` + `repos.psd1`, driven by the `repos-deploy`
@@ -45,7 +51,7 @@ not run on `latitude`: no `pwsh`, no timer, no cron. Verified 2026-09-07, when t
 is a manual errand:
 
 ```console
-ssh me@100.64.0.8
+ssh latitude.gg.ez
 git -C ~/my/vps/homeserver/embedthat/src pull --ff-only
 cd ~/my/vps/homeserver/embedthat && docker compose -f compose.prod.yml up -d --build
 ```
