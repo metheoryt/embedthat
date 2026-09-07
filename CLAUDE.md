@@ -32,15 +32,27 @@ the working gate is "no *new* findings versus baseline", not zero.
 
 ## Deployment
 
-Production runs on the homeserver (`g513ie`) through the **config-driven poll-and-build**
-pipeline owned by the `vps` repo — no registry, no CI publish. **Pushing to `main` is the
-deploy**; it lands within ~3 minutes plus build time.
+Production runs on **`latitude`** (`latitude5520`, Linux) — reachable over the tailnet at
+`100.64.0.8`; the `latitude` SSH alias currently fails with *no route to host*, so use the IP.
+The stack lives at `~/my/vps/homeserver/embedthat/` there, built locally from a gitignored
+clone at `src/` — no registry, no CI publish.
 
-- The `repos-deploy` scheduled task runs `vps/homeserver/deploy-repos.ps1` every 3 minutes
-  over every entry in `vps/homeserver/repos.psd1`.
-- Per repo it fast-forwards a gitignored clone at `vps/homeserver/embedthat/src/` and, only
-  when the source SHA or the rendered compose config changed, archives the container logs,
-  rebuilds, and recreates the stack.
+**Pushing to `main` is NOT the deploy on this host.** The config-driven poll-and-build
+pipeline in the `vps` repo (`deploy-repos.ps1` + `repos.psd1`, driven by the `repos-deploy`
+scheduled task) is **PowerShell, written for the Windows homeserver `g513ie`** — and it does
+not run on `latitude`: no `pwsh`, no timer, no cron. Verified 2026-09-07, when the
+`.embedthat-last-deployed` marker still read Jul 26 against an image built Aug 16. Deploying
+is a manual errand:
+
+```console
+ssh me@100.64.0.8
+git -C ~/my/vps/homeserver/embedthat/src pull --ff-only
+cd ~/my/vps/homeserver/embedthat && docker compose -f compose.prod.yml up -d --build
+```
+
+Nothing archives the container logs first, so `docker compose logs` history is discarded by
+that recreate — pull anything you still need out of it beforehand.
+
 - The prod compose lives in `vps` (`vps/homeserver/embedthat/compose.prod.yml`), not here —
   this repo carries only the dev `compose.yml`.
 

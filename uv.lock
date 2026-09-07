@@ -285,7 +285,7 @@ redis = [
 
 [[package]]
 name = "embedthat"
-version = "0.4.12"
+version = "0.4.13"
 source = { virtual = "." }
 dependencies = [
     { name = "aiogram" },
@@ -317,7 +317,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.7.1" },
     { name = "pydub", specifier = ">=0.25.1" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "pytubefix", specifier = ">=10.0.0" },
+    { name = "pytubefix", specifier = ">=11.1.0" },
     { name = "redis", extras = ["hiredis"], specifier = ">=5.2.1" },
     { name = "yt-dlp", specifier = ">=2026.7.4" },
 ]
@@ -1105,15 +1105,15 @@ wheels = [
 
 [[package]]
 name = "pytubefix"
-version = "10.10.1"
+version = "11.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
     { name = "nodejs-wheel-binaries" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/37/7c/d2cd1e10bff31b4d9c036381b2dd87746270624967ac61206c3866d832b4/pytubefix-10.10.1.tar.gz", hash = "sha256:41e230d128be7f85cbe0102ce7fe87943acc282cae35dabec21d2d62dc2340fa", size = 1523123, upload-time = "2026-06-24T00:51:36.809Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/48/0d/ac684a7ea4bd1cfd55f667a78b0fa3c8be0f2b1184b64b73d14febd38030/pytubefix-11.1.0.tar.gz", hash = "sha256:c90065cce61801b0ca50f794bd13ea77903069d687ebdbef5b65b27b508f8633", size = 1584871, upload-time = "2026-09-07T02:18:52.736Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/13/bc/90b3cb9c27d6f3c13c474d64bf1d9c865b5be22cde5fef096c53f11e6511/pytubefix-10.10.1-py3-none-any.whl", hash = "sha256:32ba81b2dfdcdc38af853de98cacbd0c52456e452f03d92ebea21dee19208de8", size = 1531310, upload-time = "2026-06-24T00:51:32.359Z" },
+    { url = "https://files.pythonhosted.org/packages/45/d2/fdcf252106f1fa26908a4cd20c447503d032223dda0101b83d447a511c28/pytubefix-11.1.0-py3-none-any.whl", hash = "sha256:82d268e80d8d8f128022663dda9c7d3f4054f20b9d2006ffd1ab3f09bc3c562a", size = 1594211, upload-time = "2026-09-07T02:18:50.976Z" },
 ]
 
 [[package]]

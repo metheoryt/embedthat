@@ -47,21 +47,40 @@ _COOKIE_ALERT_TTL = 24 * 60 * 60
 
 async def _alert_if_cookies_stale(redis_client: redis.Redis, url: str, error: Exception) -> None:
     """Raise a CRITICAL -- and so an admin-chat message -- when a login wall is
-    hit *while cookies are configured*, which means the jar has gone stale
-    (expired, or the account was challenged) and needs re-exporting.
+    hit *while `COOKIES_FILE` is set*, which means the jar is not doing its job
+    and a human has to act.
+
+    Two distinct causes, and the message must name the right one: the file is
+    missing (never exported, or the mount points somewhere else), or it is there
+    and the site rejected it (expired, or the account was challenged). Collapsing
+    them into "re-export it" sends the operator to re-export a jar that was never
+    exported; gating the whole alert on `.exists()` instead is worse still --
+    `cookie_opts()` logs the missing file at WARNING, and WARNING never reaches
+    `ADMIN_CHAT_ID`, which is exactly how an empty `./cookies` mount sat unnoticed
+    from 2026-08-16 to 2026-09-07 while every login-walled link failed.
 
     Silent when no cookies are configured: a login wall is then just a link we
     were never going to be able to fetch, and says nothing a human can act on.
 
     Rate-limited to one alert per day via a Redis NX+TTL key, because legitimately
     private posts raise the same error and would otherwise flood the chat --
-    the exact failure mode the CRITICAL-only threshold exists to prevent.
+    the exact failure mode the CRITICAL-only threshold exists to prevent. One key
+    covers both causes: they are mutually exclusive at any moment and the fix is
+    the same errand.
     Cannot ride on `report_actor_failure`: these actors list both download
     errors in `throws`, so dramatiq's Retries middleware never invokes it.
     """
     if not settings.cookies_file or not is_login_wall(error):
         return
     if not await redis_client.set(_COOKIE_ALERT_KEY, "1", ex=_COOKIE_ALERT_TTL, nx=True):
+        return
+    if not settings.cookies_file.exists():
+        log.critical(
+            "login wall hit and COOKIES_FILE points at %s, but there is NO SUCH FILE -- "
+            "every request has been running without cookies. Export a jar there (check the "
+            "mount if you already did). Further cookie alerts suppressed for 24h.\nlink: %s\n%s",
+            settings.cookies_file, url, error,
+        )
         return
     log.critical(
         "login wall hit while cookies ARE configured (%s) -- the cookie jar has most "

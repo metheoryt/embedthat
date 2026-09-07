@@ -46,8 +46,14 @@ class YouTubeVideoData(BaseModel):
 
     @cached_property
     def yt(self) -> YouTube:
-        # https://github.com/JuanBindez/pytubefix/pull/209
-        # return YouTube(self.link, "WEB")
+        # Deliberately no `client=` argument. Which InnerTube client YouTube still
+        # serves changes without notice, and pytubefix's default is the one upstream
+        # keeps current: 10.10.1 defaulted to ANDROID_VR, which started answering
+        # every request with BotDetection on 2026-09-01 and took the whole YouTube
+        # path down until 11.1.0 (default VISION_OS) restored it. Pinning a client
+        # here would have frozen us on the broken one -- and the obvious pin, "WEB",
+        # is the worst of them: it resolves streams fine but the CDN then serves a
+        # 31-byte body for every range request unless a PO token rides along.
         return YouTube(self.link)
 
     @translates_youtube_errors

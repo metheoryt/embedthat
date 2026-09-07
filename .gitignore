@@ -15,3 +15,4 @@ wheels/
 
 # gortex-generated per-repo routing skills (re-sprayed by `gortex init`; keep out of git)
 .claude/skills/generated/
+.claude/settings.local.json
