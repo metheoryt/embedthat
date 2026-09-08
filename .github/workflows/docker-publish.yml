@@ -1,13 +1,23 @@
 name: Docker Publish
 
-# Retired as the delivery path: embedthat now deploys via the homeserver
-# config-driven poll-and-build pipeline (the `repos-deploy` task runs
-# vps/homeserver/deploy-repos.ps1, which builds embedthat:local from a gitignored
-# clone at vps/homeserver/embedthat/src). This workflow no longer runs on push;
-# it stays available for manual one-off publishes only (workflow_dispatch).
-# Publishing metheoryt/embedthat:latest lets Tugtainer pull-update over the
-# locally built prod container — only dispatch it if you mean exactly that.
+# THIS IS THE DELIVERY PATH. A push to `main` publishes
+# metheoryt/embedthat:latest, Tugtainer on latitude notices the new digest within
+# 15 minutes and pulls it over the running containers. Nothing builds on the host.
+#
+# It was retired between 2026-07-25 and 2026-09-08 in favour of a poll-and-build
+# engine that rebuilt the image on the homeserver -- and a registry tag was
+# forbidden for exactly as long, because Tugtainer would have pull-updated over
+# the locally built container and undone a deploy. That engine is PowerShell for
+# the Windows box; prod now runs on Linux `latitude`, where it never ran at all,
+# so the registry is the delivery path again and the conflict is gone with the
+# local build.
+#
+# Docs-only pushes still publish. That is deliberate: a no-op image layer costs a
+# cache-hit rebuild, whereas a paths-ignore filter silently skips a real fix the
+# day someone edits a doc in the same commit.
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:

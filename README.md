@@ -59,7 +59,7 @@ uv run main.py
 docker compose up -d
 ```
 
-**Build Docker image** (dev only — never tag it `metheoryt/embedthat:*`, see Deployment):
+**Build Docker image** (dev only — prod images are built by CI, see Deployment):
 
 ```bash
 docker build -t embedthat:dev .
@@ -67,17 +67,15 @@ docker build -t embedthat:dev .
 
 ## Deployment
 
-Production runs on the homeserver through the config-driven poll-and-build pipeline owned by
-the `vps` repo — no registry, no CI publish. **Pushing to `main` is the deploy**: the
-`repos-deploy` scheduled task (`vps/homeserver/deploy-repos.ps1`, every 3 minutes) fetches
-this repo into a gitignored clone, rebuilds the image locally as `embedthat:local`, and
-recreates the stack from `vps/homeserver/embedthat/compose.prod.yml`.
+Production runs on `latitude`. **Pushing to `main` is the deploy**:
+`.github/workflows/docker-publish.yml` builds and pushes `metheoryt/embedthat:latest` (plus
+the `pyproject.toml` version), and Tugtainer on the host pulls the new digest within 15
+minutes and recreates the containers. Nothing builds on the host; its compose is
+`vps/homeserver/embedthat/compose.prod.yml`, tracked in the `vps` repo.
 
-Never tag an image `metheoryt/embedthat:*` — a registry tag would let Tugtainer pull-update
-the container out from under the local build. `.github/workflows/docker-publish.yml` is
-retired for the same reason (`workflow_dispatch` only).
-
-Runbook: `vps/homeserver/DEPLOYING-A-REPO.md`.
+See CLAUDE.md's Deployment section for how to force a deploy instead of waiting for the
+poll, and for the one failure mode that is silent — a container Tugtainer has disabled in
+its own database never updates, whatever compose says.
 
 ## How It Works
 

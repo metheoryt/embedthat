@@ -18,7 +18,7 @@ uv run main.py
 # Run with Docker Compose (includes Redis)
 docker compose up -d
 
-# Build the image locally (dev only — never tag it `metheoryt/embedthat:*`, see Deployment)
+# Build the image locally (dev only — prod images are built by CI, see Deployment)
 docker build -t embedthat:dev .
 
 # Lint / type-check (no test suite exists)
@@ -33,41 +33,44 @@ the working gate is "no *new* findings versus baseline", not zero.
 ## Deployment
 
 Production runs on **`latitude`** (`latitude5520`, Linux). The stack lives at
-`~/my/vps/homeserver/embedthat/` there, built locally from a gitignored clone at `src/` —
-no registry, no CI publish.
+`~/my/vps/homeserver/embedthat/` there; its compose is tracked in the `vps` repo
+(`vps/homeserver/embedthat/compose.prod.yml`), not here — this repo carries only the dev
+`compose.yml`.
 
-**Reach it as `latitude.gg.ez`, not bare `latitude`.** `/etc/resolv.conf` on the WSL boxes
-carries `search lan gg.ez` in that order, so the bare name resolves through the router's
-`.lan` zone (`latitude.lan` = `192.168.8.154`) and dies with *no route to host* from anywhere
-off that LAN — the tailnet name is never tried. The MagicDNS FQDN skips the search list.
-Same trap for `air`; `g15`/`hub`/`desktop-wsl` are unaffected only because the router has no
-`.lan` record for them.
+**Pushing to `main` is the deploy.** `.github/workflows/docker-publish.yml` builds and
+pushes `metheoryt/embedthat:latest` (plus the `pyproject.toml` version as a second tag);
+Tugtainer on latitude checks every 15 minutes (`0-59/15 * * * *`), sees the new digest and
+recreates the containers on it. Nothing builds on the host. Budget ~5 min for the Actions
+run plus up to 15 for the poll.
 
-**Pushing to `main` is NOT the deploy on this host.** The config-driven poll-and-build
-pipeline in the `vps` repo (`deploy-repos.ps1` + `repos.psd1`, driven by the `repos-deploy`
-scheduled task) is **PowerShell, written for the Windows homeserver `g513ie`** — and it does
-not run on `latitude`: no `pwsh`, no timer, no cron. Verified 2026-09-07, when the
-`.embedthat-last-deployed` marker still read Jul 26 against an image built Aug 16. Deploying
-is a manual errand:
+**Reach the host as `latitude.gg.ez`, not bare `latitude`.** `/etc/resolv.conf` on the WSL
+boxes carries `search lan gg.ez` in that order, so the bare name resolves through the
+router's `.lan` zone (`latitude.lan` = `192.168.8.154`) and dies with *no route to host*
+from anywhere off that LAN — the tailnet name is never tried. Same trap for `air`;
+`g15`/`hub`/`desktop-wsl` are unaffected only because the router has no `.lan` record for
+them.
+
+To force a deploy rather than wait for the poll:
 
 ```console
 ssh latitude.gg.ez
-git -C ~/my/vps/homeserver/embedthat/src pull --ff-only
-cd ~/my/vps/homeserver/embedthat && docker compose -f compose.prod.yml up -d --build
+cd ~/my/vps/homeserver/embedthat && docker compose -f compose.prod.yml pull && \
+  docker compose -f compose.prod.yml up -d
 ```
 
-Nothing archives the container logs first, so `docker compose logs` history is discarded by
-that recreate — pull anything you still need out of it beforehand.
+**A container Tugtainer has disabled stays on its old image forever, silently.** Its
+per-container `check_enabled`/`update_enabled` flags live in its own sqlite DB
+(`tugtainer_tugtainer_data:/tugtainer/tugtainer.db`), not in compose — both embedthat rows
+sat at 0 from 2026-07-14, left over from the local-build era. Compose changes do not reset
+them; the toggle is in the UI at `http://latitude.gg.ez:9412` (Containers), and the DB is
+the place to verify.
 
-- The prod compose lives in `vps` (`vps/homeserver/embedthat/compose.prod.yml`), not here —
-  this repo carries only the dev `compose.yml`.
-
-**Never tag an image `metheoryt/embedthat:*`.** The prod image tag is local-only
-(`embedthat:local`) on purpose: a registry tag would let Tugtainer pull-update the container
-out from under the local build and silently undo a deploy. For the same reason
-`.github/workflows/docker-publish.yml` is retired — `workflow_dispatch` only.
-
-Full runbook: `vps/homeserver/DEPLOYING-A-REPO.md`.
+**History, so the old rule does not get re-applied:** between 2026-07-25 and 2026-09-08
+this repo forbade tagging `metheoryt/embedthat:*` at all. That was correct *then* — prod was
+built locally by a poll-and-build engine, and a registry tag would have let Tugtainer pull
+over it and undo a deploy. The engine is PowerShell for the Windows homeserver `g513ie` and
+never ran on latitude, which is why deploys were manual there; with the local build gone,
+so is the conflict.
 
 ## Environment Setup
 
