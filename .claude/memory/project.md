@@ -178,12 +178,29 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   claim, not a graph claim.
 - Paths like `C:\Users\methe\GitHub\embedthat-bot` in older plans/docs are the
   historical Windows checkout; the repo was renamed `embedthat-bot` → `embedthat`.
-- The authoritative "deploy succeeded" signal is the marker file
-  `homeserver/.<name>-last-deployed` (`sourceSHA:configHash`), written only after
-  a successful build+recreate. Polling the deploy log for the new SHA is a false
-  positive — the `deploying <sha>` line is written *before* the build runs.
-- The deploy engine archives `docker compose logs` to
-  `homeserver/logs/archive/<name>-<timestamp>.log` (7-day retention) immediately
-  before each recreate, so pre-deploy history is recoverable there — but only for
-  the engine's own recreate: a hand-run `docker compose up -d --build` or a
-  `down` still discards logs (reboots and crash-restarts lose nothing).
+- **The poll-and-build engine no longer deploys this repo (2026-09-08).** Its
+  marker file `homeserver/.<name>-last-deployed` and its pre-recreate log archive
+  under `homeserver/logs/archive/` are written only for repos still in
+  `vps/homeserver/repos.psd1` — embedthat was removed from it. Prod is now
+  registry + Tugtainer (see CLAUDE.md → Deployment), and nothing archives logs
+  before a Tugtainer recreate: pull what you need out of `docker compose logs`
+  *before* triggering a deploy, or it is gone.
+
+## Cookie jar (COOKIES_FILE)
+
+- **It never reaches the YouTube pipeline.** `cookie_opts()` is called only from
+  `bot/util/social/download.py` and `bot/util/audio/download.py`; YouTube goes
+  through pytubefix, which is passed no cookies at all. A YouTube login wall is
+  not fixable by exporting a jar.
+- Live at `~/my/vps/homeserver/embedthat/cookies/cookies.txt` on latitude
+  (burner Instagram account, placed 2026-09-08). yt-dlp rewrites it in place on
+  close **preserving uid 1000**, so a re-export is a plain `scp` over it. The
+  write-back legitimately drops session-only cookies whose expiry is `0` (`rur`);
+  a shorter file after the first download is not corruption.
+- **Discriminate bad-jar from stale-extractor before re-exporting.** yt-dlp in
+  the image lags (2026.07.04 as of this writing) and the Instagram extractor
+  churns fast. Control: `https://www.instagram.com/reel/Dc8fZX9idsQ/` needs no
+  login — if that fails too, it is the extractor, not the cookies. Walled
+  reference post: `https://www.instagram.com/reel/DcMT3ZEtSuN/`.
+- Verify with a real download inside `embedthat-worker-1`, never a metadata
+  probe — extraction succeeding with cookies present is not proof of bytes.
