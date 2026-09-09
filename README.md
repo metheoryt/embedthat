@@ -1,17 +1,20 @@
 # Embed That! Bot
 
-A Telegram bot that converts social media links into playable embeds or native videos directly in chat.
+A Telegram bot that converts social media links into native Telegram videos or audio, delivered straight into the chat.
 
 Live at: https://t.me/embedthat_bot
 
 ## Supported Platforms
 
-| Platform    | Behavior                                                                       |
-|-------------|--------------------------------------------------------------------------------|
-| YouTube     | Downloads and uploads video natively (up to 50 MB, split into parts if needed) |
-| Instagram   | Rewrites link to ddinstagram.com proxy                                         |
-| TikTok      | Rewrites link to vxtiktok.com proxy                                            |
-| Twitter / X | Rewrites link to fxtwitter.com / fixupx.com                                    |
+| Platform                                                | Behavior                                                                                              |
+|---------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| YouTube                                                 | Downloads and uploads video natively (up to 50 MB, split into parts if needed); a button extracts audio |
+| Instagram, TikTok, Twitter / X, Facebook, Reddit, …     | Downloaded with yt-dlp, re-encoded to iOS-compatible H.264/AAC and re-uploaded as a native video        |
+| SoundCloud, Bandcamp, Mixcloud, Audiomack, Yandex Music | Audio-only: a single track, or a playlist paginated 10 tracks per page                                  |
+
+Any `https://` link that is not YouTube falls into the same catch-all download path, so the
+real list is "whatever yt-dlp supports". Spotify / Apple Music / Deezer are DRM-protected
+and out of scope.
 
 ## Requirements
 
@@ -79,13 +82,20 @@ its own database never updates, whatever compose says.
 
 ## How It Works
 
-1. User sends a social media link.
-2. `bot/handlers.py` detects the `LinkOrigin` and routes accordingly.
-3. Instagram/TikTok/Twitter links are rewritten to embed-friendly proxy domains and sent back.
-4. YouTube links go through a full pipeline:
+1. User sends a link.
+2. `bot/handlers.py` serves Redis cache hits inline and never downloads anything. On a miss it
+   registers a waiter for the cache key and, only if it is the first waiter, enqueues a
+   Dramatiq job — the separate `worker` process does all the work.
+3. YouTube links go through their own pipeline:
     - Best quality stream within Telegram's 50 MB limit is selected
     - Video and audio are downloaded separately and merged with FFmpeg
     - If the result exceeds 50 MB, it is split into up to 10 parts
     - Optionally, audio is translated: language is detected via Whisper, translated via `vot-cli`, and mixed with the
-      original (quieted)
-5. Processed YouTube `file_id`s are cached in Redis — repeat requests are served instantly without re-downloading.
+      original (quieted) — off unless `ENABLE_AUDIO_TRANSLATION` is set
+4. Every other link is downloaded with yt-dlp and re-encoded to iOS-compatible H.264/AAC. There
+   is no domain rewriting or proxy embedding anywhere in the codebase.
+5. A link whose formats carry no video track is classified as audio and routed to the audio
+   pipeline instead. Classification is generic, never a domain allowlist.
+6. Finished files are sent to `DUMP_CHAT_ID` to mint stable Telegram `file_id`s, which are cached
+   in Redis and fanned out to every chat waiting on that key — repeat requests are served
+   instantly without re-downloading.

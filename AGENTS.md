@@ -4,7 +4,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## Project Overview
 
-**Embed That! Bot** is a Telegram bot that converts social media links (YouTube, Instagram, TikTok, Twitter/X) into playable embeds or native Telegram videos. Live at https://t.me/embedthat_bot.
+**Embed That! Bot** is a Telegram bot that converts social media links (YouTube, Instagram, TikTok, Twitter/X, SoundCloud, …) into native Telegram videos or audio. Live at https://t.me/embedthat_bot.
 
 ## Commands
 
