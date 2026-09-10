@@ -70,19 +70,22 @@ docker build -t embedthat:dev .
 
 ## Deployment
 
-Production runs on `latitude`. **Pushing a `v*` tag is the deploy; pushing `main` is
-not**: `.github/workflows/docker-publish.yml` runs on both, but only a tag publishes
-`metheoryt/embedthat:latest` (plus the bare version), and Tugtainer on the host pulls the
-new digest within 15 minutes and recreates the containers. A push to `main` builds the
-image and throws it away, so a broken Dockerfile still fails on the commit that broke it.
-Nothing builds on the host; its compose is
-`vps/homeserver/embedthat/compose.prod.yml`, tracked in the `vps` repo.
+Production runs on `latitude`. **Pushing a `v*` tag is the deploy; pushing `main` builds
+nothing**: `.github/workflows/docker-publish.yml` publishes
+`metheoryt/embedthat:latest` (plus the bare version) on a tag only, and Tugtainer on the
+host pulls the new digest within 15 minutes and recreates the containers. Nothing builds
+on the host; its compose is `vps/homeserver/embedthat/compose.prod.yml`, tracked in the
+`vps` repo.
 
 ```console
 # bump `version` in pyproject.toml first — the run fails if it disagrees with the tag
-git push origin main
+git push origin main               # no build, no deploy
 git tag v0.4.18 && git push origin v0.4.18
 ```
+
+To build without releasing — a Dockerfile or dependency change — run the workflow
+manually (`workflow_dispatch`) on `main`: it builds and publishes nothing. Dispatching it
+on a `v*` tag republishes that release.
 
 See CLAUDE.md's Deployment section for how to force a deploy instead of waiting for the
 poll, and for the one failure mode that is silent — a container Tugtainer has disabled in

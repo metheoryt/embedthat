@@ -37,29 +37,32 @@ Production runs on **`latitude`** (`latitude5520`, Linux). The stack lives at
 (`vps/homeserver/embedthat/compose.prod.yml`), not here — this repo carries only the dev
 `compose.yml`.
 
-**Pushing a `v*` tag is the deploy; pushing `main` is not.**
-`.github/workflows/docker-publish.yml` runs on both, but only a tag gets `push: true` —
-it publishes `metheoryt/embedthat:latest` (plus the bare version as a second tag), and
-Tugtainer on latitude checks every 15 minutes (`0-59/15 * * * *`), sees the new digest and
-recreates the containers on it. Nothing builds on the host. Budget ~5 min for the Actions
-run plus up to 15 for the poll.
-
-A push to `main` builds the image and throws it away: main is a place to land work
-without redeploying prod, while a broken Dockerfile still fails on the commit that broke
-it rather than ambushing the next release. So a release is two pushes and two Actions
-runs — the branch run (build-only) and the tag run (build + publish):
+**Pushing a `v*` tag is the deploy. Pushing `main` builds nothing at all.**
+`.github/workflows/docker-publish.yml` is the only workflow and a tag is its only
+automatic trigger: it publishes `metheoryt/embedthat:latest` (plus the bare version as a
+second tag), and Tugtainer on latitude checks every 15 minutes (`0-59/15 * * * *`), sees
+the new digest and recreates the containers on it. Nothing builds on the host. Budget
+~5 min for the Actions run plus up to 15 for the poll.
 
 ```console
 # bump `version` in pyproject.toml first — the workflow fails the run if the tag
 # and pyproject disagree, rather than shipping an image that misreports itself
-git push origin main
+git push origin main               # no build, no deploy
 git tag v0.4.18 && git push origin v0.4.18
 ```
 
 Both prod services pin `:latest`, so that ref has to keep moving on a release — it is the
-deploy channel, not a convenience alias. `workflow_dispatch` publishes only when the
-selected ref is a tag; dispatching it on `main` builds and pushes nothing, so a manual
-redeploy means dispatching **on the tag**.
+deploy channel, not a convenience alias.
+
+**The build is otherwise manual, and `workflow_dispatch` reads its own ref** —
+`push: ${{ github.ref_type == 'tag' }}` gates publishing, so the same button does two
+things and there is no way to publish `latest` off an untagged commit:
+
+- dispatch on **`main`** (or any branch) → builds, publishes nothing. This is the
+  Dockerfile smoke test; reach for it after touching the Dockerfile, `uv.lock` or a
+  system dependency, since with `main` no longer building on push a broken image would
+  otherwise surface at release time.
+- dispatch on a **`v*` tag** → builds and publishes, i.e. a redeploy of that release.
 
 **Reach the host as `latitude.gg.ez`, not bare `latitude`.** `/etc/resolv.conf` on the WSL
 boxes carries `search lan gg.ez` in that order, so the bare name resolves through the

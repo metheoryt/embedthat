@@ -7,20 +7,21 @@ name: Docker Publish
 # `:latest`, so that ref has to keep moving on a release — it is the deploy
 # channel, not a convenience alias.
 #
-# A push to `main` builds WITHOUT pushing. That is the point of the split: main
-# stays a place to land work without redeploying prod, while a broken Dockerfile
-# still fails on the commit that broke it instead of ambushing the next release.
-# It also warms the buildx cache (GHA cache is scoped per ref with a fallback to
-# the default branch, so a tag run may or may not restore main's cache — if a
-# release build is slow, that is why, not a regression).
+# Nothing else runs automatically. A push to `main` builds nothing at all, which
+# is the point: main is a place to land work without redeploying prod, and
+# without spending a build on every doc fix.
 #
-# Expect TWO runs per release: `git push origin main` fires the build-only run
-# and `git push origin v0.4.18` fires the publishing one. They are separate
-# events, not a retry.
+# The one trigger that is not a tag is manual, and it reads its own ref:
 #
-# workflow_dispatch publishes only when the selected ref is a tag, by the same
-# `ref_type` test. Dispatching on `main` builds and pushes nothing — a manual
-# redeploy means dispatching **on the tag**.
+#   workflow_dispatch on `main` (or any branch) -> builds, publishes NOTHING.
+#       This is the Dockerfile smoke test. Reach for it after touching the
+#       Dockerfile, uv.lock or a system dependency, because with main no longer
+#       building on push, a broken image would otherwise surface at release time.
+#   workflow_dispatch on a `v*` tag           -> builds and publishes, i.e. a
+#       redeploy of that exact release.
+#
+# So `push: ${{ github.ref_type == 'tag' }}` is doing double duty and there is
+# no way to publish `latest` off an untagged commit, deliberately.
 #
 # The version is taken from the tag and checked against pyproject.toml, which is
 # bumped by hand. A disagreement fails the run rather than shipping an image
@@ -35,7 +36,6 @@ name: Docker Publish
 # local build.
 on:
   push:
-    branches: [ main ]
     tags: [ 'v*' ]
   workflow_dispatch:
 
