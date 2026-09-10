@@ -1,4 +1,5 @@
 import logging
+from typing import Any, TypedDict
 
 import dramatiq
 
@@ -36,8 +37,13 @@ _TRANSIENT_EXC_NAMES = (
 )
 
 
-def _extract_link(message_data: dict) -> str | None:
-    args = message_data.get("args") or []
+class RetryInfo(TypedDict):
+    retries: int
+    max_retries: int | None
+
+
+def _extract_link(message_data: dict[str, Any]) -> str | None:
+    args: list[Any] = message_data.get("args") or []
     if message_data.get("actor_name") in _LINK_ARG_ACTORS and len(args) >= 2:
         return args[1]
     return None
@@ -56,7 +62,7 @@ def _is_transient_failure(traceback_text: str) -> bool:
 
 
 @dramatiq.actor(max_retries=0)
-def report_actor_failure(message_data: dict, retry_info: dict) -> None:
+def report_actor_failure(message_data: dict[str, Any], retry_info: RetryInfo) -> None:
     """Registered as `on_retry_exhausted` on worker actors; fires once, when
     dramatiq's Retries middleware gives up on a message for good. Actors whose
     `throws` option matches the exception are excluded upstream by Retries
@@ -67,8 +73,8 @@ def report_actor_failure(message_data: dict, retry_info: dict) -> None:
     root logger's TelegramAlertHandler (see bot.util.telegram_log_handler)
     picks up CRITICAL records and forwards them to the admin chat.
     """
-    options = message_data.get("options") or {}
-    traceback_text = options.get("traceback", "")
+    options: dict[str, Any] = message_data.get("options") or {}
+    traceback_text: str = options.get("traceback", "")
 
     if _is_transient_failure(traceback_text):
         # Not forwarded to the admin chat (ERROR < CRITICAL): a network/timeout

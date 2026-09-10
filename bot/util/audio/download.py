@@ -16,12 +16,12 @@ from .schema import AudioTrackData
 log = logging.getLogger(__name__)
 
 
-def _is_audio_only(info: dict) -> bool:
+def _is_audio_only(info: dict[str, Any]) -> bool:
     formats = info.get("formats") or [info]
     return not any(f.get("vcodec") not in (None, "none") for f in formats)
 
 
-def _deep_probe(url: str) -> dict:
+def _deep_probe(url: str) -> dict[str, Any]:
     opts: Any = {"quiet": True, "skip_download": True, "noplaylist": True, **cookie_opts()}
     with yt_dlp.YoutubeDL(opts) as ydl:
         try:

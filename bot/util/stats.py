@@ -1,19 +1,36 @@
 import asyncio
 from datetime import date, timedelta
+from typing import TypedDict
 
 from bot.config import settings
 from bot.util.redis import redis_client
 from bot.worker.broker import broker as dramatiq_broker
 
 
-async def _queue_stats() -> dict:
+class QueueStats(TypedDict):
+    pending: int
+    failed: int
+
+
+class PeriodStats(TypedDict):
+    requests: int
+    success: int
+    fail: int
+    unique_users: int
+    private: int
+    groups: int
+    platforms: dict[str, int]
+    langs: dict[str, int]
+
+
+async def _queue_stats() -> QueueStats:
     namespace = dramatiq_broker.namespace
     pending = await redis_client.hlen(f"{namespace}:default.msgs")
     failed = await redis_client.zcard(f"{namespace}:default.XQ")
     return {"pending": pending, "failed": failed}
 
 
-async def _period_stats(dates: list[str]) -> dict:
+async def _period_stats(dates: list[str]) -> PeriodStats:
     all_success_keys: list[str] = []
     all_lang_keys: list[str] = []
     for d in dates:
@@ -67,14 +84,15 @@ async def _period_stats(dates: list[str]) -> dict:
 
 
 def _date_range(start: date, end: date) -> list[str]:
-    result, d = [], start
+    result: list[str] = []
+    d = start
     while d <= end:
         result.append(d.strftime("%Y-%m-%d"))
         d += timedelta(days=1)
     return result
 
 
-def _fmt_section(title: str, stats: dict) -> str:
+def _fmt_section(title: str, stats: PeriodStats) -> str:
     lines = [
         title,
         f"  Requests:     {stats['requests']}  (✓ {stats['success']}  ✗ {stats['fail']})",
