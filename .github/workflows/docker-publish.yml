@@ -1,8 +1,30 @@
 name: Docker Publish
 
-# THIS IS THE DELIVERY PATH. A push to `main` publishes
-# metheoryt/embedthat:latest, Tugtainer on latitude notices the new digest within
-# 15 minutes and pulls it over the running containers. Nothing builds on the host.
+# THIS IS THE DELIVERY PATH, and only a **tag** walks it. Pushing a `v*` tag
+# publishes metheoryt/embedthat:latest (plus the bare version); Tugtainer on
+# latitude notices the new digest within 15 minutes and pulls it over the
+# running containers. Nothing builds on the host. Both prod services pin
+# `:latest`, so that ref has to keep moving on a release — it is the deploy
+# channel, not a convenience alias.
+#
+# A push to `main` builds WITHOUT pushing. That is the point of the split: main
+# stays a place to land work without redeploying prod, while a broken Dockerfile
+# still fails on the commit that broke it instead of ambushing the next release.
+# It also warms the buildx cache (GHA cache is scoped per ref with a fallback to
+# the default branch, so a tag run may or may not restore main's cache — if a
+# release build is slow, that is why, not a regression).
+#
+# Expect TWO runs per release: `git push origin main` fires the build-only run
+# and `git push origin v0.4.18` fires the publishing one. They are separate
+# events, not a retry.
+#
+# workflow_dispatch publishes only when the selected ref is a tag, by the same
+# `ref_type` test. Dispatching on `main` builds and pushes nothing — a manual
+# redeploy means dispatching **on the tag**.
+#
+# The version is taken from the tag and checked against pyproject.toml, which is
+# bumped by hand. A disagreement fails the run rather than shipping an image
+# whose reported version is a lie.
 #
 # It was retired between 2026-07-25 and 2026-09-08 in favour of a poll-and-build
 # engine that rebuilt the image on the homeserver -- and a registry tag was
@@ -11,13 +33,10 @@ name: Docker Publish
 # the Windows box; prod now runs on Linux `latitude`, where it never ran at all,
 # so the registry is the delivery path again and the conflict is gone with the
 # local build.
-#
-# Docs-only pushes still publish. That is deliberate: a no-op image layer costs a
-# cache-hit rebuild, whereas a paths-ignore filter silently skips a real fix the
-# day someone edits a doc in the same commit.
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   workflow_dispatch:
 
 jobs:
@@ -27,16 +46,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Read version from pyproject.toml
+      - name: Resolve version
         id: version
         run: |
-          VERSION=$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
+          set -euo pipefail
+          PYPROJECT_VERSION=$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            if [ "$VERSION" != "$PYPROJECT_VERSION" ]; then
+              echo "::error::tag $GITHUB_REF_NAME says $VERSION but pyproject.toml says $PYPROJECT_VERSION — bump one to match before releasing"
+              exit 1
+            fi
+          else
+            VERSION="$PYPROJECT_VERSION"
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
+        if: github.ref_type == 'tag'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -46,7 +76,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          push: ${{ github.ref_type == 'tag' }}
           tags: |
             metheoryt/embedthat:latest
             metheoryt/embedthat:${{ steps.version.outputs.version }}

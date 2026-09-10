@@ -37,11 +37,29 @@ Production runs on **`latitude`** (`latitude5520`, Linux). The stack lives at
 (`vps/homeserver/embedthat/compose.prod.yml`), not here — this repo carries only the dev
 `compose.yml`.
 
-**Pushing to `main` is the deploy.** `.github/workflows/docker-publish.yml` builds and
-pushes `metheoryt/embedthat:latest` (plus the `pyproject.toml` version as a second tag);
+**Pushing a `v*` tag is the deploy; pushing `main` is not.**
+`.github/workflows/docker-publish.yml` runs on both, but only a tag gets `push: true` —
+it publishes `metheoryt/embedthat:latest` (plus the bare version as a second tag), and
 Tugtainer on latitude checks every 15 minutes (`0-59/15 * * * *`), sees the new digest and
 recreates the containers on it. Nothing builds on the host. Budget ~5 min for the Actions
 run plus up to 15 for the poll.
+
+A push to `main` builds the image and throws it away: main is a place to land work
+without redeploying prod, while a broken Dockerfile still fails on the commit that broke
+it rather than ambushing the next release. So a release is two pushes and two Actions
+runs — the branch run (build-only) and the tag run (build + publish):
+
+```console
+# bump `version` in pyproject.toml first — the workflow fails the run if the tag
+# and pyproject disagree, rather than shipping an image that misreports itself
+git push origin main
+git tag v0.4.18 && git push origin v0.4.18
+```
+
+Both prod services pin `:latest`, so that ref has to keep moving on a release — it is the
+deploy channel, not a convenience alias. `workflow_dispatch` publishes only when the
+selected ref is a tag; dispatching it on `main` builds and pushes nothing, so a manual
+redeploy means dispatching **on the tag**.
 
 **Reach the host as `latitude.gg.ez`, not bare `latitude`.** `/etc/resolv.conf` on the WSL
 boxes carries `search lan gg.ez` in that order, so the bare name resolves through the

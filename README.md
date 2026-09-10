@@ -70,11 +70,19 @@ docker build -t embedthat:dev .
 
 ## Deployment
 
-Production runs on `latitude`. **Pushing to `main` is the deploy**:
-`.github/workflows/docker-publish.yml` builds and pushes `metheoryt/embedthat:latest` (plus
-the `pyproject.toml` version), and Tugtainer on the host pulls the new digest within 15
-minutes and recreates the containers. Nothing builds on the host; its compose is
+Production runs on `latitude`. **Pushing a `v*` tag is the deploy; pushing `main` is
+not**: `.github/workflows/docker-publish.yml` runs on both, but only a tag publishes
+`metheoryt/embedthat:latest` (plus the bare version), and Tugtainer on the host pulls the
+new digest within 15 minutes and recreates the containers. A push to `main` builds the
+image and throws it away, so a broken Dockerfile still fails on the commit that broke it.
+Nothing builds on the host; its compose is
 `vps/homeserver/embedthat/compose.prod.yml`, tracked in the `vps` repo.
+
+```console
+# bump `version` in pyproject.toml first — the run fails if it disagrees with the tag
+git push origin main
+git tag v0.4.18 && git push origin v0.4.18
+```
 
 See CLAUDE.md's Deployment section for how to force a deploy instead of waiting for the
 poll, and for the one failure mode that is silent — a container Tugtainer has disabled in
