@@ -61,7 +61,8 @@ cd ~/my/vps/homeserver/embedthat && docker compose -f compose.prod.yml pull && \
 **A container Tugtainer has disabled stays on its old image forever, silently.** Its
 per-container `check_enabled`/`update_enabled` flags live in its own sqlite DB
 (`tugtainer_tugtainer_data:/tugtainer/tugtainer.db`), not in compose — both embedthat rows
-sat at 0 from 2026-07-14, left over from the local-build era. Compose changes do not reset
+sat at 0 from 2026-07-14, left over from the local-build era (both read 1/1 again as of
+2026-09-10, so auto-deploy is live). Compose changes do not reset
 them; the toggle is in the UI at `http://latitude.gg.ez:9412` (Containers), and the DB is
 the place to verify.
 
@@ -170,6 +171,16 @@ Redis is simultaneously the cache, the dramatiq broker, and the lock store.
 
 - Python 3.12, FFmpeg, Node.js, `vot-cli` (global npm package for YouTube audio translation)
 - Redis (separate container in `compose.yml`)
+- **The base image must stay on Debian trixie** (`ghcr.io/astral-sh/uv:python3.12-trixie-slim`).
+  On the bookworm base TikTok's edge answered every yt-dlp request with a 537-byte
+  "Site Maintenance" page instead of the WAF challenge page the extractor knows how to
+  solve, so every TikTok link died as `Unexpected response from webpage request` →
+  "❌ Couldn't process this link" (measured 2026-09-10: 5/5 fail in the bookworm
+  container, 5/5 succeed from a trixie one on the same public IP, same yt-dlp). Upgrading
+  yt-dlp does not help and neither does `curl_cffi` impersonation — the extractor forces
+  its own `chrome` target. The one measured difference is the TLS stack (OpenSSL 3.0.18
+  vs 3.5.x), which is a plausible fingerprint story, not something isolated. A base
+  downgrade takes TikTok down again.
 
 ## Versioning
 

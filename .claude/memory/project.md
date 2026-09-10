@@ -186,6 +186,28 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   before a Tugtainer recreate: pull what you need out of `docker compose logs`
   *before* triggering a deploy, or it is gone.
 
+## Base image (measured 2026-09-10)
+
+- **A site can block by TLS stack, so "works on my box" proves nothing about the
+  container.** Every TikTok link failed in prod while the same yt-dlp, same
+  version, same public IP (`37.99.43.34`) succeeded on g15. Deterministic 5/5
+  both ways. The container's request got a 537-byte "Site Maintenance" edge page;
+  the working one got the 1462-byte WAF challenge page, which the extractor
+  retries with a challenge cookie.
+- **Reproduce the split in two commands** before touching code:
+  `docker compose -f compose.prod.yml exec worker .venv/bin/python -c` a
+  `ydl.urlopen(Request(<video page>)).read()` and compare its length against the
+  same call on a stock `python:3.12-slim-trixie` container on the same host.
+- Ruled out on evidence, so do not re-try them: newer yt-dlp (2026.08.19 fails
+  too), `curl_cffi` impersonation (the extractor forces its own `chrome` target,
+  which resolves to the macOS build → same 537; `chrome:windows` fetches the page
+  fine but `extract_info` never uses it), cookies, yt-dlp cache, DNS, egress IP.
+- `curl_cffi` >= 0.16 is rejected by yt-dlp 2026.07.04 (`Only ... 0.5.10 and
+  0.10.x through 0.15.x are supported`) — pin `<0.16` if impersonation is ever
+  actually needed.
+- The trixie bump carries ffmpeg 5.1 → 7.1; the YouTube merge and `split_video`
+  paths were verified at 480p on the built image, not assumed.
+
 ## Cookie jar (COOKIES_FILE)
 
 - **It never reaches the YouTube pipeline.** `cookie_opts()` is called only from

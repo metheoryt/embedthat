@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim
 
 # ffmpeg for YT streams merge
 # NodeJS + vot-cli for YT video translations https://github.com/FOSWLY/vot-cli
