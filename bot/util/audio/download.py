@@ -8,7 +8,7 @@ from yt_dlp.utils import DownloadError
 
 from bot.config import settings
 from bot.util.youtube.video import MAX_FILE_SIZE_BYTES
-from bot.util.ytdlp import cookie_opts
+from bot.util.ytdlp import cookie_opts, wrap_download_error
 
 from .exc import AudioDownloadError
 from .schema import AudioTrackData
@@ -27,7 +27,7 @@ def _deep_probe(url: str) -> dict:
         try:
             info = ydl.extract_info(url, download=False)
         except DownloadError as e:
-            raise AudioDownloadError(str(e)) from e
+            raise wrap_download_error(e, AudioDownloadError) from e
     if info is None:
         raise AudioDownloadError(f"Could not extract media from {url}")
     return cast(dict[str, Any], info)
@@ -47,7 +47,7 @@ def probe_link(url: str) -> tuple[bool, list[AudioTrackData]]:
         try:
             info = ydl.extract_info(url, download=False)
         except DownloadError as e:
-            raise AudioDownloadError(str(e)) from e
+            raise wrap_download_error(e, AudioDownloadError) from e
 
     if info is None:
         raise AudioDownloadError(f"Could not extract media from {url}")
@@ -114,7 +114,7 @@ def download_track(track: AudioTrackData, output_dir: Path) -> Path:
         try:
             info = ydl.extract_info(track.webpage_url, download=True)
         except DownloadError as e:
-            raise AudioDownloadError(str(e)) from e
+            raise wrap_download_error(e, AudioDownloadError) from e
 
     if info is None:
         raise AudioDownloadError(f"Could not download {track.title or track.webpage_url}")

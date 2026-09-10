@@ -2,12 +2,14 @@ import asyncio
 import logging
 import tempfile
 from pathlib import Path
+from typing import NoReturn
 
 import dramatiq
 import redis.asyncio as redis
 from aiogram import Bot, types
 from aiogram.enums import ChatAction
 from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
+from dramatiq.middleware import CurrentMessage
 from redis.asyncio.lock import Lock
 
 from bot.config import settings
@@ -24,7 +26,7 @@ from bot.util.youtube.enum import TargetLang
 from bot.util.youtube.exc import YouTubeError
 from bot.util.youtube.schema import YouTubeVideoData
 from bot.util.youtube.video import get_audio_stream
-from bot.util.ytdlp import is_login_wall
+from bot.util.ytdlp import TransientDownloadError, is_login_wall
 from bot.worker.broker import (
     broker,  # noqa: F401 -- registers the Redis broker before actors are declared
 )
@@ -40,6 +42,11 @@ from bot.worker.pipeline import (
 from bot.worker.waiters import Waiter, pop_waiters
 
 log = logging.getLogger(__name__)
+
+# Kept as a constant because `_is_final_attempt` has to compare against the very
+# number the decorator below was given -- reading it back off the actor works but
+# goes through untyped dramatiq internals.
+_SOCIAL_MAX_RETRIES = 2
 
 _COOKIE_ALERT_KEY = "cookies:stale-alerted"
 _COOKIE_ALERT_TTL = 24 * 60 * 60
@@ -87,6 +94,46 @@ async def _alert_if_cookies_stale(redis_client: redis.Redis, url: str, error: Ex
         "likely gone stale; re-export it. Further cookie alerts suppressed for 24h.\nlink: %s\n%s",
         settings.cookies_file, url, error,
     )
+
+
+def _is_final_attempt(max_retries: int) -> bool:
+    """True when the message being processed has no dramatiq retry left.
+
+    Reads the attempt counter off `CurrentMessage` (middleware installed in
+    `bot.worker.broker`); dramatiq's Retries middleware bumps
+    `options["retries"]` only when it re-enqueues, so during attempt N the
+    counter still reads N. Outside a worker -- a probe script, a direct call --
+    there is no message and no retry coming, so the caller must report at once.
+    """
+    message = CurrentMessage.get_current_message()
+    if message is None:
+        return True
+    retries: int = (message.options or {}).get("retries", 0)
+    return retries >= max_retries
+
+
+async def _retry_or_report(
+    bot: Bot,
+    redis_client: redis.Redis,
+    cache_key: str,
+    error: TransientDownloadError,
+    permanent: type[Exception],
+    message: str,
+    max_retries: int = _SOCIAL_MAX_RETRIES,
+) -> NoReturn:
+    """Handles a `TransientDownloadError`: re-raise it so dramatiq retries with
+    backoff, or -- on the last attempt -- tell the waiters and convert it.
+
+    The conversion matters. `permanent` is a class the actor lists in `throws=`,
+    so dramatiq aborts the message without invoking `report_actor_failure`: a
+    site that stayed unreachable for the whole retry budget is the user's
+    problem to see, not a bug to page the admin about. Always raises.
+    """
+    if not _is_final_attempt(max_retries):
+        raise error
+    waiters = await _pop_waiters(redis_client, cache_key)
+    await _notify_waiters_failure(bot, waiters, f"{message}: {error}")
+    raise permanent(str(error)) from error
 
 
 async def _safe_edit_ack(bot: Bot, chat_id: int, message_id: int | None, text: str) -> None:
@@ -306,6 +353,11 @@ async def _process_social_link_async(bot: Bot, chat_id: int, url: str) -> None:
         async with HeartbeatLock(lock):
             try:
                 is_audio, tracks = await asyncio.to_thread(probe_link, url)
+            except TransientDownloadError as e:
+                await _retry_or_report(
+                    bot, redis_client, video.cache_key, e,
+                    AudioDownloadError, "❌ Couldn't process this link",
+                )
             except AudioDownloadError as e:
                 waiters = await _pop_waiters(redis_client, video.cache_key)
                 await _notify_waiters_failure(bot, waiters, f"❌ Couldn't process this link: {e}")
@@ -330,6 +382,11 @@ async def _process_social_link_async(bot: Bot, chat_id: int, url: str) -> None:
 
             try:
                 video = await handle_social_video(bot, video)
+            except TransientDownloadError as e:
+                await _retry_or_report(
+                    bot, redis_client, video.cache_key, e,
+                    SocialDownloadError, "❌ Couldn't download this video",
+                )
             except SocialDownloadError as e:
                 waiters = await _pop_waiters(redis_client, video.cache_key)
                 await _notify_waiters_failure(bot, waiters, f"❌ Couldn't download this video: {e}")
@@ -348,7 +405,7 @@ async def _process_social_link_async(bot: Bot, chat_id: int, url: str) -> None:
 
 
 @dramatiq.actor(
-    max_retries=2,
+    max_retries=_SOCIAL_MAX_RETRIES,
     min_backoff=30_000,
     max_backoff=5 * 60_000,
     time_limit=25 * 60_000,

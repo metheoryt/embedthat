@@ -43,6 +43,19 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   `bot/util/social/__init__.py` are **deliberate side effects / re-exports**
   (`bot/events/__init__.py` pulls `.handlers` purely to register signal
   handlers). Silence F401 by declaring `__all__`, never by deleting them.
+- **Exercising an actor's retry path locally** (verified 2026-09-10): the dev
+  stack is safe to run beside prod — the local `.env` holds the debug bot
+  `@assinstantbot`, not the prod token — but its `REDIS_URL` points at
+  `localhost` (it is written for a host-run `main.py`), so an in-container
+  worker needs an override file: `docker compose -f compose.yml -f <tmp>.yml up
+  -d worker` with `REDIS_URL: redis://redis`. Source is bind-mounted, so code
+  changes need no rebuild.
+- A deterministic yt-dlp failure is easier to *serve* than to find: run a
+  `BaseHTTPRequestHandler` answering 403 on `127.0.0.1:8099` inside the worker
+  (`docker compose exec -d worker python -c ...`) and feed the actor that URL —
+  the generic extractor turns it into a real `HTTP Error 403`. Register a
+  `Waiter` with `chat_id=settings.dump_chat_id` first, so the failure message
+  lands in the dump chat instead of a user's.
 
 ## Dependencies & versioning
 

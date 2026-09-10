@@ -158,7 +158,15 @@ Redis is simultaneously the cache, the dramatiq broker, and the lock store.
 - **Error classification**: every routine, user-facing exception an actor can raise
   is listed in that actor's `throws=` tuple, which skips both the retries and
   `on_retry_exhausted` — so a bad link reaches the user as a reason instead of
-  paging the admin. Telegram admin alerts fire on `log.critical` only, deliberately:
+  paging the admin. The one deliberate exception is `TransientDownloadError`
+  (`bot/util/ytdlp.py`): a yt-dlp failure that reads retryable (403/429/5xx,
+  timeouts, connection resets — never a login wall) is raised as that class,
+  which is *absent* from `throws=` so dramatiq retries it with backoff. On the
+  last attempt the actor pops the waiters, sends the failure message and
+  re-raises it as the permanent class, so the retry budget never ends in either
+  silence or an admin page. `_is_final_attempt()` reads the attempt counter off
+  `CurrentMessage`, whose middleware `bot/worker/broker.py` installs for that
+  purpose. Telegram admin alerts fire on `log.critical` only, deliberately:
   WARNING/ERROR mark routine conditions (ack races, ffprobe fallbacks, per-attempt
   retries)
 - **Multi-part delivery**: `sendMediaGroup` accepts no `reply_markup`, so split

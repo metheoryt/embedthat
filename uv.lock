@@ -285,7 +285,7 @@ redis = [
 
 [[package]]
 name = "embedthat"
-version = "0.4.16"
+version = "0.4.17"
 source = { virtual = "." }
 dependencies = [
     { name = "aiogram" },

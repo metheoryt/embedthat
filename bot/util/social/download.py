@@ -6,7 +6,7 @@ import ffmpeg
 import yt_dlp
 
 from bot.config import settings
-from bot.util.ytdlp import cookie_opts
+from bot.util.ytdlp import cookie_opts, wrap_download_error
 
 from .exc import SocialDownloadError
 
@@ -47,7 +47,8 @@ def download_social_video(url: str, output_dir: Path, max_res: int = settings.ma
     """
     Synchronous yt-dlp download. Call via asyncio.to_thread in the handler.
 
-    Raises SocialDownloadError for unrecoverable failures (private/removed/geo-blocked).
+    Raises SocialDownloadError for unrecoverable failures (private/removed/geo-blocked),
+    TransientDownloadError for the ones worth another attempt (429/5xx/timeouts).
     """
     ydl_opts = {
         **cookie_opts(),
@@ -79,7 +80,7 @@ def download_social_video(url: str, output_dir: Path, max_res: int = settings.ma
         try:
             info = ydl.extract_info(url, download=True)
         except yt_dlp.utils.DownloadError as e:
-            raise SocialDownloadError(str(e)) from e
+            raise wrap_download_error(e, SocialDownloadError) from e
 
     video_id = info["id"]
     file_path = output_dir / f"{video_id}.mp4"
