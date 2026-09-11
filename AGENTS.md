@@ -64,6 +64,13 @@ things and there is no way to publish `latest` off an untagged commit:
   otherwise surface at release time.
 - dispatch on a **`v*` tag** → builds and publishes, i.e. a redeploy of that release.
 
+**That redeploy button is not idempotent by ref.** Dispatching an older `v*` tag after a
+newer one has shipped rebuilds the old source and repoints `:latest` at it — a silent
+rollback, because both prod services pin `:latest` and Tugtainer will happily pull it.
+Nothing guards against this; it is inherent to latest-pinned compose plus tag dispatch, so
+check which tag you are dispatching on before you press it.
+<!-- src: embedthat 710e8a5 | 2026-09-12 -->
+
 **Reach the host as `latitude.gg.ez`, not bare `latitude`.** `/etc/resolv.conf` on the WSL
 boxes carries `search lan gg.ez` in that order, so the bare name resolves through the
 router's `.lan` zone (`latitude.lan` = `192.168.8.154`) and dies with *no route to host*

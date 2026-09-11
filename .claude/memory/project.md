@@ -1,4 +1,4 @@
-<!-- KB refreshed against a8284b3 on 2026-07-26 -->
+<!-- KB refreshed against 710e8a5 on 2026-09-12 -->
 
 # Project memory — embedthat
 
@@ -57,6 +57,32 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   `Waiter` with `chat_id=settings.dump_chat_id` first, so the failure message
   lands in the dump chat instead of a user's.
 
+- **`pydub-stubs` exists and is now a dev dependency** — the stub situation is
+  asymmetric, not uniform: `pydub-stubs` is on PyPI and installed, while both
+  `types-<name>` and `<name>-stubs` return 404 for `pytubefix`, `ffmpeg-python`
+  and `faster-whisper` (checked against PyPI directly, 2026-09-10). So the
+  remaining `reportUnknown*` noise in `bot/util/youtube/video.py` and
+  `translate.py` is a **ceiling, not debt** — no `uv add` moves it, and the only
+  lever left is boundary annotations at the call sites. The Dockerfile installs
+  with `--no-dev`, so a stub package never reaches prod.
+  <!-- conflicts-with: "`faster_whisper`, `ffmpeg`, `pydub` and `pytubefix` publish no stub package on PyPI" -->
+  <!-- src: embedthat cec9e3a | 2026-09-12 -->
+- **Gortex reports live code as dead here — do not act on it.** The graph cannot
+  see aiogram `@router.message` / `@router.callback_query` handlers, the
+  `@dramatiq.actor` entries in `bot/worker/actors.py`, the aiosignal handlers
+  wired by `freeze_signals()`, or `emit` in `telegram_log_handler.py`. Every one
+  of those is reached by a registry or a decorator at import time, so a
+  dead-symbol or unused-import finding on them is an artifact of the resolver,
+  not a cleanup candidate.
+  <!-- src: embedthat 710e8a5 | 2026-09-12 -->
+- **"Streams resolved" is not proof that bytes arrive.** pytubefix's `WEB` and
+  `WEB_SAFARI` clients resolve stream metadata perfectly and the CDN then serves
+  a **31-byte body** for every range request unless a PO token rides along. Any
+  claim that a YouTube client works has to come from a real byte-range fetch
+  (`urllib` with `Range: bytes=0-262143`, assert HTTP 206 and the length), never
+  from `yt.streams` succeeding.
+  <!-- src: embedthat 710e8a5 | 2026-09-12 -->
+
 ## Dependencies & versioning
 
 - Re-run `uv lock` and commit `uv.lock` in the same change as any hand-edited
@@ -88,6 +114,23 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   retries routinely exceeds 10 minutes, which is exactly dramatiq's `TimeLimit`
   default (it force-kills the actor thread). Its `Retries` default of 20 is
   equally dangerous, since a retry re-runs the whole download/upload pipeline.
+
+- **No InnerTube client is pinned in `bot/util/youtube/schema.py`, deliberately.**
+  Which client YouTube still serves changes without notice and pytubefix's
+  default is the one upstream keeps current: 10.10.1 defaulted to `ANDROID_VR`,
+  which began answering every request with `BotDetection` on 2026-09-01 and took
+  the whole YouTube path down until 11.1.0 (default `VISION_OS`) restored it. A
+  pin would have frozen the repo on the broken default, and the obvious pin
+  (`"WEB"`) is the worst of them — see the 31-byte-body note above. 10.11.0
+  predates the breakage, so 11.x was the only forward version.
+  <!-- src: embedthat 710e8a5 | 2026-09-12 -->
+- **The image has Node but yt-dlp will not use it.** `/usr/bin/node` is present
+  (it is there for `vot-cli`), yet yt-dlp enables only `deno` by default, so it
+  warns "No supported JavaScript runtime could be found … some formats may be
+  missing" on every run. Social downloads work regardless, so this is a known
+  non-urgent gap rather than a fault to chase — closing it means adding deno to
+  the Dockerfile or passing `js_runtimes`.
+  <!-- src: embedthat 710e8a5 | 2026-09-12 -->
 
 ## Cache & Redis
 
@@ -170,6 +213,19 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   masked by the stale volume: `docker compose rm -f` both services and drop the
   volume before the new deps appear.
 
+- **Attacker-controlled fields are logged with `%r`, never `%s`.** A Telegram
+  display name, chat title, username or message body is whatever the sender
+  typed — one real sample carried a `<prompt>…</prompt>` injection aimed at
+  whoever reads the logs, and a newline in any of them forges whole log lines.
+  `%r` quotes and escapes, so a hostile value can only ever be one line's
+  argument. `bot/events/handlers/log.py` interpolates every field but `origin`
+  that way; keep it that way when adding fields.
+  <!-- src: embedthat 710e8a5 | 2026-09-12 -->
+- `bot/util/aiohttp.py` was **deleted** — the cleanup happened; there is no such
+  module to remove any more.
+  <!-- conflicts-with: "`bot/util/aiohttp.py` is dead — zero importers, and its module-level `ClientSession()` would raise on import outside a running loop. Cleanup candidate." -->
+  <!-- src: embedthat 1c8ce78 | 2026-09-12 -->
+
 ## Repo & deploy conventions
 
 - **`AGENTS.md` is a hand-synced twin of `CLAUDE.md`** — a real file, not a
@@ -198,6 +254,29 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   registry + Tugtainer (see CLAUDE.md → Deployment), and nothing archives logs
   before a Tugtainer recreate: pull what you need out of `docker compose logs`
   *before* triggering a deploy, or it is gone.
+
+- **`AGENTS.md` is now the ONLY guidance file, and `CLAUDE.md` is a 135-byte
+  pointer at it.** The twin arrangement was collapsed because the two files were
+  12.8 KB of byte-identical text and every session paid for both. **Do not run
+  the old resync recipe** — `tail -n +4` of a one-line pointer is empty, so it
+  would truncate `AGENTS.md` to three lines and delete the repo's entire
+  guidance. Edit `AGENTS.md` directly and leave `CLAUDE.md` alone; nothing needs
+  mirroring in either direction. Any bullet or doc here that says "see
+  `CLAUDE.md` → <section>" means `AGENTS.md` → that section.
+  <!-- conflicts-with: "`{ head -3 AGENTS.md; tail -n +4 CLAUDE.md; } > .agents.new && mv .agents.new AGENTS.md`, then verify with `diff <(tail -n +4 AGENTS.md) <(tail -n +4 CLAUDE.md)`" -->
+  <!-- src: embedthat 710e8a5 | 2026-09-12 -->
+- **`gh run list --limit 1` does not mean "the build".** This repo also runs a
+  Dependency Graph workflow, which finishes in seconds, so a bare
+  `gh run list`/`gh run watch` on the newest row reports success while
+  `docker-publish` is still building — that mistake produced a `compose pull` of
+  the *previous* image and a "deployed" claim that was false. Watch by run ID,
+  or filter on the workflow name.
+  <!-- src: embedthat 710e8a5 | 2026-09-12 -->
+- **`embedthat-redis-1` is left disabled in Tugtainer on purpose.** Only the bot
+  and worker rows are enabled for auto-update; the datastore is not, because its
+  volume is the one the prod compose warns must never be `down -v`'d. An
+  apparently "missing" Tugtainer row for redis is the intended state.
+  <!-- src: embedthat 710e8a5 | 2026-09-12 -->
 
 ## Base image (measured 2026-09-10)
 
