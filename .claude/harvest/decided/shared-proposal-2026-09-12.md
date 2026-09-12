@@ -28,3 +28,13 @@ deduped rather than re-proposed:
 
 (none — nothing in these digests was specific to this machine rather than to the
 repo or the fleet.)
+
+---
+
+# /cyphy:memory-review decision — 2026-09-12 (applied on g15)
+
+The one row is applied.
+
+APPLIED -> ~/.claude/memory/global.md (1): a site can block on the TLS STACK, so "works
+on my box" proves nothing about the container — compare response-body lengths before
+touching code, and treat the base image as a suspect.

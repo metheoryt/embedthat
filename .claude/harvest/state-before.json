@@ -1,0 +1,236 @@
+{
+  "last_refresh": {
+    "commit": "710e8a5cf67b475d60f04a3ccc9c2a98b012f136",
+    "date": "2026-09-12",
+    "tiers_touched": [
+      ".claude/memory/project.md",
+      "AGENTS.md",
+      ".claude/harvest/shared-proposal-2026-09-12.md"
+    ],
+    "sessions_processed": [
+      "0a6e53cf-dcc4-4e58-b9c8-456ef89bd1af",
+      "93da0596-00f4-4425-8db1-7b393332a32f",
+      "abdd3f47-df4c-43f4-b9ee-a2a3e5c7c690",
+      "d37319e2-2fa3-4c64-b2fd-7b605ecf2849"
+    ]
+  },
+  "sessions": {
+    "0a6e53cf-dcc4-4e58-b9c8-456ef89bd1af": {
+      "cwd": "/home/me/my/embedthat",
+      "host": "g513ie",
+      "id_hash": "67b7592c1e1b207c53151a09da903b02a6eddd59",
+      "last_line": 639,
+      "last_ts": "2026-09-10T16:35:48.415Z"
+    },
+    "0e7c1afc-0ecc-4a6f-8ee0-94c48520a76c": {
+      "cwd": "/home/me/orca/workspaces/embedthat/instagram-fix",
+      "host": "g614jv",
+      "id_hash": "de066ff146ba4dd377a96f5f24b3f3ac1d762357",
+      "last_line": 377,
+      "last_ts": "2026-07-25T12:25:49.128Z"
+    },
+    "16db0dfc-cfb5-42ef-b100-c74d7bedf037": {
+      "cwd": "/home/me/orca/workspaces/embedthat/refresh-kb",
+      "host": "g614jv",
+      "id_hash": "d95f5f4c41991d0c15a8e6388677ac30e1b3d3b9",
+      "last_line": 316,
+      "last_ts": "2026-07-25T18:33:49.626Z"
+    },
+    "1a7117e4-5c12-49c6-a304-beead90d6cb8": {
+      "cwd": "C:\\Users\\methe\\orca\\workspaces\\vps\\embedthat-fixes",
+      "host": "g513ie",
+      "id_hash": "0288f1aaf01110fd644e8b1e8b2df103f235fd66",
+      "last_line": 301,
+      "last_ts": "2026-07-17T12:16:44.540Z"
+    },
+    "1ea52f75-1371-411b-9ac0-9c6bac9babab": {
+      "cwd": "C:\\Users\\methe\\GitHub\\embedthat-bot",
+      "host": "g614jv",
+      "id_hash": "32e9eff1748e2863c383db7db515f081c67af094",
+      "last_line": 28,
+      "last_ts": "2026-07-02T14:39:16.973Z"
+    },
+    "2c67648c-5d43-422a-b162-f3bd885b1e15": {
+      "cwd": "C:\\Users\\methe\\orca\\workspaces\\vps\\embedthat-fixes",
+      "host": "g513ie",
+      "id_hash": "3bbb2c1e408d264f3b774b28f05353919e222569",
+      "last_line": 1155,
+      "last_ts": "2026-07-17T14:52:55.230Z"
+    },
+    "35f02c43-fb8c-4658-a3c1-836952eca8a8": {
+      "cwd": "C:\\Users\\methe\\GitHub\\embedthat-bot",
+      "host": "g614jv",
+      "id_hash": "94f72b444cd3a92e73764e594ae2e1b36cd251c7",
+      "last_line": 11,
+      "last_ts": "2026-07-04T00:56:19.304Z"
+    },
+    "3df5940f-9b99-4869-8878-fb6f5014a7c8": {
+      "cwd": "/home/me/orca/workspaces/embedthat/refresh-kb",
+      "host": "g614jv",
+      "id_hash": "14997dfb1bebef4c2410b9429502954bcb31a33b",
+      "last_line": 45,
+      "last_ts": "2026-07-25T18:56:17.374Z"
+    },
+    "4593415b-505b-48c4-8e03-e583ad384ba7": {
+      "cwd": "C:\\Users\\methe\\GitHub\\embedthat-bot",
+      "host": "g614jv",
+      "id_hash": "d8ed6b2456b60ebacd532201d3a04e77457cc9eb",
+      "last_line": 12,
+      "last_ts": "2026-07-04T15:31:00.511Z"
+    },
+    "52f71bb7-19a3-4255-af3d-420669690848": {
+      "cwd": "C:\\Users\\methe\\GitHub\\embedthat-bot",
+      "host": "g614jv",
+      "id_hash": "0bfd922c285dac8d367bc12607ff226a84e06625",
+      "last_line": 762,
+      "last_ts": "2026-07-03T09:38:10.300Z"
+    },
+    "649b910a-b0ae-44d0-a82e-a18cb2a5b30c": {
+      "cwd": "C:\\Users\\methe\\GitHub\\embedthat-bot",
+      "host": "g614jv",
+      "id_hash": "6fbc2981039afc7c6b1dd7baf84b0374d8bebb62",
+      "last_line": 846,
+      "last_ts": "2026-07-04T15:24:37.375Z"
+    },
+    "65a22ca9-f503-4214-a971-a8b90754afc9": {
+      "cwd": "C:\\Users\\methe\\GitHub\\embedthat-bot",
+      "host": "g614jv",
+      "id_hash": "1d9c24566665070035925b239dc0bd44c2b04c1c",
+      "last_line": 11,
+      "last_ts": "2026-07-02T16:13:33.593Z"
+    },
+    "661762a0-e240-465e-8993-fff5803afe4f": {
+      "cwd": "C:\\Users\\methe\\GitHub\\embedthat-bot",
+      "host": "g614jv",
+      "id_hash": "b0c1d682a585e08367d7a46a61ed2d46672bd16e",
+      "last_line": 101,
+      "last_ts": "2026-07-03T21:05:19.905Z"
+    },
+    "6cacebba-48b1-4946-bd68-27b47077b124": {
+      "cwd": "C:\\Users\\methe\\GitHub\\embedthat-bot",
+      "host": "g614jv",
+      "id_hash": "8752cab72eeaf51b9b4636f7ace3eadbbf15011a",
+      "last_line": 245,
+      "last_ts": "2026-07-02T17:00:42.001Z"
+    },
+    "74a3f212-360e-406d-96fd-88ab87455805": {
+      "cwd": "C:\\Users\\methe\\GitHub\\embedthat-bot",
+      "host": "g614jv",
+      "id_hash": "79f18d6ac82cf9e0c51e2ad00e885f442309942e",
+      "last_line": 698,
+      "last_ts": "2026-07-04T11:04:02.244Z"
+    },
+    "762a3c67-7c6d-4d0a-9531-8b4490f4c0b6": {
+      "cwd": "C:\\Users\\methe\\GitHub\\embedthat-bot",
+      "host": "g614jv",
+      "id_hash": "92cd30abcbc71255ec9b654681d18d2d71183450",
+      "last_line": 84,
+      "last_ts": "2026-06-29T13:57:26.443Z"
+    },
+    "8b0dea9f-0b10-49fa-bf5c-b81839d9fa53": {
+      "cwd": "C:\\Users\\methe\\GitHub\\embedthat-bot",
+      "host": "g614jv",
+      "id_hash": "1b3dfcdb18b78c08cd72c651fd18982534f4661b",
+      "last_line": 483,
+      "last_ts": "2026-07-02T17:41:20.462Z"
+    },
+    "8c75b0cc-8b0e-4766-af4d-e4131543d489": {
+      "cwd": "C:\\Users\\methe\\GitHub\\embedthat-bot",
+      "host": "g614jv",
+      "id_hash": "3188329387aa93e662769872bbd833b2491b85eb",
+      "last_line": 1057,
+      "last_ts": "2026-07-02T13:41:44.942Z"
+    },
+    "93da0596-00f4-4425-8db1-7b393332a32f": {
+      "cwd": "/home/me/my/embedthat",
+      "host": "g513ie",
+      "id_hash": "f618d76e9ff538b362b0736c09d04c722c66e3b5",
+      "last_line": 767,
+      "last_ts": "2026-09-10T16:21:37.434Z"
+    },
+    "97838d9d-c447-4947-b880-2ffc95e6a2af": {
+      "cwd": "/home/me/my/embedthat",
+      "host": "g614jv",
+      "id_hash": "06a71a62837fe7c257a9b0d62dbfa5270110d276",
+      "last_line": 22,
+      "last_ts": "2026-07-17T09:53:01.676Z"
+    },
+    "97aaedc0-88dc-42d2-b232-f4016fcb4244": {
+      "cwd": "C:\\Users\\methe\\GitHub\\embedthat-bot",
+      "host": "g614jv",
+      "id_hash": "1e95cfeb08c891ca5adf55abe853d234dcc8d20e",
+      "last_line": 180,
+      "last_ts": "2026-07-02T18:11:00.106Z"
+    },
+    "abdd3f47-df4c-43f4-b9ee-a2a3e5c7c690": {
+      "cwd": "/home/me/my/embedthat",
+      "host": "g513ie",
+      "id_hash": "015d72b199cb72002132764e0fe6b0231d40cd81",
+      "last_line": 842,
+      "last_ts": "2026-09-10T18:44:00.283Z"
+    },
+    "b293763a-e99f-497f-9e47-fd183ed404c2": {
+      "cwd": "C:\\Users\\methe\\orca\\workspaces\\embedthat\\log-watcher",
+      "host": "g513ie",
+      "id_hash": "e98a039358e148b1e1551a157b401e1d42090f52",
+      "last_line": 200,
+      "last_ts": "2026-07-17T17:40:09.337Z"
+    },
+    "bdd86c4a-c583-4811-b35e-ffffad69838d": {
+      "cwd": "C:\\Users\\methe\\GitHub\\embedthat-bot",
+      "host": "g614jv",
+      "id_hash": "3f89d9946535f13d73a44d50dd4374324826c3fc",
+      "last_line": 322,
+      "last_ts": "2026-07-02T16:40:04.759Z"
+    },
+    "c380df19-a6bd-4594-9325-d1ae5c5bb91c": {
+      "cwd": "C:\\Users\\methe\\GitHub\\embedthat-bot",
+      "host": "g614jv",
+      "id_hash": "fa16c0772711c8f801380ef7c86bfa0990592050",
+      "last_line": 12,
+      "last_ts": "2026-07-02T14:38:38.724Z"
+    },
+    "d37319e2-2fa3-4c64-b2fd-7b605ecf2849": {
+      "cwd": "/home/me/my/embedthat",
+      "host": "g513ie",
+      "id_hash": "7027a2d0f3b4beb0a412579bc0f185a9815082b9",
+      "last_line": 1053,
+      "last_ts": "2026-09-09T07:18:03.373Z"
+    },
+    "dcbd3f90-7cfc-4499-9d29-d0c0098e673c": {
+      "cwd": "/home/me/orca/workspaces/embedthat/instagram-fix",
+      "host": "g614jv",
+      "id_hash": "fe1e5629aa2729284ab02b8af41986aa296d8279",
+      "last_line": 394,
+      "last_ts": "2026-07-25T13:50:09.400Z"
+    },
+    "dd113f6a-1141-4b15-87d3-2588c2a288cb": {
+      "cwd": "C:\\Users\\methe\\GitHub\\embedthat-bot",
+      "host": "g614jv",
+      "id_hash": "a29b4b8f82f64d5274a0537b7d0c6bc2745b033c",
+      "last_line": 302,
+      "last_ts": "2026-07-02T16:13:25.662Z"
+    },
+    "e29a9b61-cff0-4e0d-bff4-25582c2592f5": {
+      "cwd": "/home/me/my/embedthat",
+      "host": "g614jv",
+      "id_hash": "af4d6a57251ed7b4069347093fc3cc5f07e8f46c",
+      "last_line": 245,
+      "last_ts": "2026-07-17T11:53:45.800Z"
+    },
+    "ef3596cf-83a1-4de5-821f-9092f059f1bb": {
+      "cwd": "C:\\Users\\methe\\GitHub\\embedthat-bot",
+      "host": "g614jv",
+      "id_hash": "0d85b1491157386f9fd7ed3c9c3724babb7878b1",
+      "last_line": 22,
+      "last_ts": "2026-07-04T00:53:04.357Z"
+    },
+    "fc1b7c7b-dbbf-420a-b3bb-0badf7732a9e": {
+      "cwd": "C:\\Users\\methe\\GitHub\\embedthat-bot",
+      "host": "g614jv",
+      "id_hash": "ac66b287a74db939437840370cd09041e87abcd5",
+      "last_line": 1072,
+      "last_ts": "2026-07-03T20:13:17.160Z"
+    }
+  }
+}
