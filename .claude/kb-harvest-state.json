@@ -1,18 +1,9 @@
 {
   "last_refresh": {
-    "commit": "710e8a5cf67b475d60f04a3ccc9c2a98b012f136",
+    "commit": "074610f17f80bd0db5df9413cef2b9bd226d90ca",
     "date": "2026-09-12",
-    "tiers_touched": [
-      ".claude/memory/project.md",
-      "AGENTS.md",
-      ".claude/harvest/shared-proposal-2026-09-12.md"
-    ],
-    "sessions_processed": [
-      "0a6e53cf-dcc4-4e58-b9c8-456ef89bd1af",
-      "93da0596-00f4-4425-8db1-7b393332a32f",
-      "abdd3f47-df4c-43f4-b9ee-a2a3e5c7c690",
-      "d37319e2-2fa3-4c64-b2fd-7b605ecf2849"
-    ]
+    "sessions_processed": [],
+    "tiers_touched": []
   },
   "sessions": {
     "0a6e53cf-dcc4-4e58-b9c8-456ef89bd1af": {
