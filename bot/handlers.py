@@ -16,6 +16,7 @@ from .util.audio.schema import AudioRequestData
 from .util.chat import is_group_chat
 from .util.cookies import MAX_JAR_BYTES
 from .util.redis import redis_client
+from .util.social.download import normalize_social_url
 from .util.social.schema import SocialVideoData
 from .util.stats import build_stats_report
 from .util.youtube.enum import TargetLang
@@ -267,6 +268,9 @@ async def get_audio_page(callback: types.CallbackQuery) -> None:
 
 
 async def _process_social_url(message: Message, url: str) -> None:
+    # Before anything is keyed on it: Instagram's share button stamps a fresh
+    # `stkn` on every share, and the cache key is a hash of the whole link.
+    url = normalize_social_url(url)
     audio = AudioRequestData(link=url)
     if audio_raw := await redis_client.get(audio.cache_key):
         cached_audio = AudioRequestData.model_validate_json(audio_raw)

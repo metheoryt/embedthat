@@ -4,7 +4,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 import ffmpeg
 
@@ -54,6 +54,32 @@ class DownloadResult:
     extractor: str  # yt-dlp extractor key, e.g. "TikTok", "Instagram", "Twitter"
     missing: list[int]  # carousel positions that never produced a file
     total: int  # items the post claims to have, including the missing ones
+
+
+# The only query parameter that changes what we deliver. Everything else
+# Instagram appends is per-share noise.
+_MEANINGFUL_QUERY = frozenset({"img_index"})
+
+
+def normalize_social_url(url: str) -> str:
+    """Strips per-share junk so the same post hashes to the same cache key.
+
+    Instagram's own share button appends `stkn=<random>` -- a fresh token every
+    time, e.g. `?img_index=9&stkn=MW91eTg3d2hyNHdicQ==`. `cache_key` hashes the
+    whole link, so two people sharing one post produced two different keys: the
+    cache never hit and every share re-downloaded the post from scratch. Verified
+    that the token means nothing to the extractor -- with it and without it,
+    position 9 resolves to the same item.
+
+    Scoped to Instagram deliberately: other extractors do carry meaning in the
+    query string, and stripping it blindly would break them.
+    """
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if host != "instagram.com" and not host.endswith(".instagram.com"):
+        return url
+    kept = [(k, v) for k, v in parse_qsl(parts.query) if k in _MEANINGFUL_QUERY]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept), ""))
 
 
 def carousel_index(url: str) -> int | None:

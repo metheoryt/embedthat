@@ -371,6 +371,16 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   `preference` `None`, so ordering is the only handle; yt-dlp sorts worst-to-best
   and the last one is the original (1440x1800 JPEG, 87 KB, served from a URL
   named `.heic`). Fetched over plain HTTP and probed for real dimensions.
+- **Instagram's share button stamps a per-share `stkn` token**, e.g.
+  `?img_index=9&stkn=MW91eTg3d2hyNHdicQ==` (decodes to an opaque `1ouy87whr4wbq`).
+  `cache_key` hashes the whole link, so before `normalize_social_url` every share
+  of one post got its own key: the cache never hit and each share re-downloaded
+  the post. The token means nothing to the extractor — position 9 resolves to the
+  same item with it and without. Normalization is Instagram-scoped and keeps only
+  `img_index`; other extractors carry meaning in their query strings.
+- **A real share from the app DOES carry `img_index`** — confirmed against the
+  untouched link. A link pasted without one has usually been edited by hand, so
+  do not conclude "shares have no index" from a bare URL.
 - **Telegram accepts a mixed photo+video media group**, verified by sending
   10 + 3 into the dump chat. The cap is 10 per group, so a 13-item post is two
   messages.
