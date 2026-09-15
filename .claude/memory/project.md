@@ -344,3 +344,37 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   reference post: `https://www.instagram.com/reel/DcMT3ZEtSuN/`.
 - Verify with a real download inside `embedthat-worker-1`, never a metadata
   probe — extraction succeeding with cookies present is not proof of bytes.
+
+## Instagram carousels & yt-dlp (measured 2026-09-15, post `DdLlGOuGdlE`, 12 videos + 1 photo)
+
+- **`?img_index=N` is ignored by yt-dlp** — 2026.07.04 and the pinned 2026.08.19
+  both return the full 13-entry playlist for `img_index=3` and `img_index=13`
+  alike. `carousel_index()` in `bot/util/social/download.py` parses it and
+  translates to `playlist_items`; nothing upstream does it for you.
+- **`noplaylist: True` never narrowed a carousel either.** A post URL *is* the
+  playlist, so the flag has no video-plus-playlist case to disambiguate: all 13
+  entries were extracted and downloaded, and the old `glob("*.mp4")[0]` kept an
+  arbitrary one. Removed.
+- **Entry positions map 1:1 onto the carousel, photo included** — 13 entries with
+  the still at position 13. No off-by-one, so `img_index` → `playlist_items` is
+  a straight translation. Re-check this if a post ever shows fewer entries than
+  items.
+- **`ignore_no_formats_error` survives the metadata stage but NOT a download.**
+  With `download=False` a photo entry comes back with 0 formats and a warning;
+  with `download=True` the extractor's `No video formats found!` aborts the whole
+  post and takes the healthy videos with it. Hence the two-pass structure —
+  enumerate, then download only the positions that really are video.
+  `ignoreerrors` over one pass would work too, and would also swallow genuine
+  failures, which is why it was not chosen.
+- **A carousel still is not downloadable as media.** It resolves to 0 formats and
+  exists only as `thumbnails` — 14 of them, all with `width`/`height`/
+  `preference` `None`, so ordering is the only handle; yt-dlp sorts worst-to-best
+  and the last one is the original (1440x1800 JPEG, 87 KB, served from a URL
+  named `.heic`). Fetched over plain HTTP and probed for real dimensions.
+- **Telegram accepts a mixed photo+video media group**, verified by sending
+  10 + 3 into the dump chat. The cap is 10 per group, so a 13-item post is two
+  messages.
+- **Known limitation: a carousel is all-or-nothing.** One entry failing the
+  download pass raises `SocialDownloadError` for the post, so a 403 on item 7
+  delivers zero of thirteen — and only after the full retry budget, since
+  `http error 403` is in `_TRANSIENT_MARKERS`.
