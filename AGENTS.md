@@ -146,6 +146,19 @@ Redis is simultaneously the cache, the dramatiq broker, and the lock store.
 5. Signals in `bot/events/signals.py` trigger cross-cutting handlers (logging in
    `log.py`, usage counters in `stats.py`).
 
+### Admin-only surfaces (`ADMIN_CHAT_ID`)
+
+Both check `message.chat.id == settings.admin_chat_id` and return silently
+otherwise — a non-admin never learns they exist.
+
+- `/stats` — usage report.
+- **Uploading a `.txt` document** installs it as the yt-dlp cookie jar. The
+  handler only enqueues; the work runs in the `install_cookies` actor because
+  the `./cookies` mount is on the **worker** container alone. It merges by site
+  rather than overwriting (the live jar is multi-site, a browser export is not),
+  refuses an Instagram export with no `sessionid`, backs the old jar up, and
+  clears the `cookies:stale-alerted` suppression key. See `bot/util/cookies.py`.
+
 ### YouTube Pipeline (`bot/util/youtube/`)
 
 - `video.py` — main orchestration: selects best adaptive stream within Telegram's 50 MB limit, downloads video and audio separately, merges with FFmpeg, splits into ≤50 MB parts if needed (up to 10 parts)

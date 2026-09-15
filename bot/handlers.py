@@ -14,12 +14,14 @@ from .events import on_link_received, on_social_video_sent, on_yt_video_sent
 from .util.audio.pager import redeliver_page
 from .util.audio.schema import AudioRequestData
 from .util.chat import is_group_chat
+from .util.cookies import MAX_JAR_BYTES
 from .util.redis import redis_client
 from .util.social.schema import SocialVideoData
 from .util.stats import build_stats_report
 from .util.youtube.enum import TargetLang
 from .util.youtube.schema import YouTubeVideoData
 from .worker.actors import (
+    install_cookies,
     process_audio_page,
     process_social_link,
     process_youtube_audio,
@@ -98,6 +100,32 @@ async def cmd_stats(message: types.Message) -> None:
     if not settings.admin_chat_id or message.chat.id != settings.admin_chat_id:
         return
     await message.reply(await build_stats_report())
+
+
+@router.message(F.document)
+async def upload_cookies(message: types.Message) -> None:
+    """Take a browser-exported cookies.txt from the admin and install it.
+
+    The alternative was an `scp` onto the host every time Instagram invalidated
+    the session, which is how it worked until 2026-09-15 and which is why the
+    jar sat broken for a week. Admin-only and silent otherwise: a document from
+    anyone else is not an error worth answering.
+    """
+    if not settings.admin_chat_id or message.chat.id != settings.admin_chat_id:
+        return
+
+    doc = message.document
+    if not doc or not (doc.file_name or "").lower().endswith(".txt"):
+        return
+    if doc.file_size and doc.file_size > MAX_JAR_BYTES:
+        await message.reply(f"❌ That file is larger than {MAX_JAR_BYTES // 1024} KB — a cookie jar is ~4 KB.")
+        return
+
+    log.info("admin uploaded %r (%s bytes) as a cookie jar", doc.file_name, doc.file_size)
+    # The worker's threads may all be inside 25-minute downloads, so say something
+    # now rather than leaving the upload unanswered until one frees up.
+    await message.reply("🍪 Queued — installing the jar.")
+    install_cookies.send(message.chat.id, doc.file_id, message.message_id)
 
 
 @router.message(

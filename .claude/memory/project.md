@@ -311,6 +311,14 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   close **preserving uid 1000**. The write-back legitimately drops session-only
   cookies whose expiry is `0` (`rur`); a shorter file after the first download is
   not corruption.
+- **Installing a new jar is a Telegram upload now, not an `scp`.** Send the
+  exported `.txt` to the bot from `ADMIN_CHAT_ID`; `install_cookies` in
+  `bot/worker/actors.py` merges it, backs the old one up as `cookies.txt.bak-*`,
+  clears `cookies:stale-alerted`, replies with a per-site cookie count and
+  deletes the upload from the chat. The merge, the `sessionid` gate and the
+  ownership handling live in `bot/util/cookies.py`. The manual procedure below
+  is still the reference for what that code does — and the fallback when the bot
+  itself is down.
 - **The jar is MULTI-SITE — never `scp` a single-site export over it.** It also
   carries tiktok, vk, x.com, reddit, soundcloud and threads cookies, and a
   browser's per-site export would silently drop them all. Merge instead: strip

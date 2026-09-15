@@ -19,6 +19,8 @@ from bot.util.audio.exc import AudioDownloadError
 from bot.util.audio.pager import redeliver_page
 from bot.util.audio.schema import AudioRequestData, AudioTrackData
 from bot.util.chat import is_group_chat
+from bot.util.cookies import CookieJarError
+from bot.util.cookies import install as install_cookie_jar
 from bot.util.redis_lock import HeartbeatLock
 from bot.util.social.exc import SocialDownloadError
 from bot.util.social.schema import SocialVideoData
@@ -463,5 +465,76 @@ def process_audio_page(chat_id: int, hash16: str, page: int) -> None:
     bot = Bot(token=settings.bot_token)
     try:
         asyncio.run(_process_audio_page_async(bot, chat_id, hash16, page))
+    finally:
+        asyncio.run(bot.session.close())
+
+
+async def _install_cookies_async(bot: Bot, chat_id: int, file_id: str, message_id: int) -> None:
+    try:
+        file = await bot.get_file(file_id)
+        if not file.file_path:
+            raise CookieJarError("Telegram returned no download path for that file")
+        buf = await bot.download_file(file.file_path)
+        if buf is None:
+            raise CookieJarError("Telegram returned an empty file")
+        try:
+            text = buf.read().decode("utf-8")
+        except UnicodeDecodeError as e:
+            raise CookieJarError("that file is not UTF-8 text") from e
+
+        report = await asyncio.to_thread(install_cookie_jar, text)
+    except CookieJarError as e:
+        log.warning("cookie jar upload rejected: %s", e)
+        await bot.send_message(chat_id, f"❌ Not installed — {e}")
+        return
+    except Exception as e:
+        # Without this he uploads a file and hears nothing: `max_retries=0` and no
+        # `on_retry_exhausted` means a network error or a failed write just dead-
+        # letters. It matters most for a failed write, because the jar is replaced
+        # in place -- a half-written one is live and there would be no sign of it.
+        log.exception("cookie jar install failed")
+        await bot.send_message(chat_id, f"❌ Install failed — {type(e).__name__}: {e}")
+        raise
+
+    # A fresh jar deserves a fresh alert budget. `_alert_if_cookies_stale` stays
+    # quiet for 24h after it fires, so installing minutes after an alert would
+    # otherwise silence the very window that tells him the new jar is bad too.
+    redis_client = redis.from_url(str(settings.redis_dsn), decode_responses=True)
+    try:
+        await redis_client.delete(_COOKIE_ALERT_KEY)
+    finally:
+        await redis_client.aclose()
+
+    await bot.send_message(chat_id, report)
+
+    # The upload is a live session credential and Telegram keeps chat history
+    # forever. Deleting it leaves the copy on Telegram's servers but takes it out
+    # of the scrollback of a bot that anyone he later adds an admin to can read.
+    # Broad on purpose: the install already succeeded and he already has the
+    # report, so a failure here must not turn a done job into a dead letter.
+    try:
+        await bot.delete_message(chat_id, message_id)
+    except Exception:
+        log.info("could not delete the uploaded cookie file message", exc_info=True)
+
+
+@dramatiq.actor(max_retries=0, time_limit=60_000)
+def install_cookies(chat_id: int, file_id: str, message_id: int) -> None:
+    """Install an uploaded jar. Runs here, not in the bot container, because the
+    `./cookies` mount is on `worker` alone -- deliberately, so the two cannot
+    race on the file yt-dlp writes back on every close.
+
+    The message carries the Telegram `file_id`, not the bytes: the broker is the
+    Redis instance that snapshots to disk every minute, and a dead-lettered
+    message sits there for 7 days. Passing the jar itself would put the session
+    cookie on disk in two more places.
+
+    `max_retries=0` -- a rejected export is rejected on every attempt, and a
+    silent retry of a *successful* install would restore a superseded jar over
+    the live one.
+    """
+    bot = Bot(token=settings.bot_token)
+    try:
+        asyncio.run(_install_cookies_async(bot, chat_id, file_id, message_id))
     finally:
         asyncio.run(bot.session.close())
