@@ -32,6 +32,31 @@ log = logging.getLogger(__name__)
 _URL_RE = re.compile(r"https?://\S+")
 _YOUTUBE_URL_RE = re.compile(r"https?://((www|m)\.)?youtube\.com/|https?://youtu\.be/")
 
+# Hosts that are definitionally not a video or audio post, skipped before a job
+# is ever queued. `embed_social` reacts to any message containing a URL, so in a
+# group chat an ordinary pasted wiki or repo link used to cost a full yt-dlp
+# attempt -- 14 of the 44 dead-lettered jobs on 2026-09-15 were links like these,
+# and the Instagram ones among them spent the burner account's session on a
+# fetch that could never have returned a video.
+#
+# A DENYLIST, not an allowlist, on purpose. /start promises "and more", and
+# yt-dlp supports thousands of sites; an allowlist that forgets one silently
+# stops working with no error the user can see. Letting a junk host through
+# costs one wasted attempt -- exactly what happens today -- so the cheap-to-be-
+# wrong side is the right one. Add to this only for hosts that can never carry
+# media, never for a platform that merely fails often.
+_NOT_MEDIA_HOST_RE = re.compile(
+    r"^https?://([^/@]*\.)?("
+    r"github\.com|gitlab\.com|"
+    r"wikipedia\.org|wikimedia\.org|"
+    r"t\.me|telegra\.ph|telegraph\.co\.uk|"
+    r"google\.com|docs\.google\.com|"
+    r"stackoverflow\.com|"
+    r"pypi\.org|npmjs\.com"
+    r")([/?#]|$)",
+    re.IGNORECASE,
+)
+
 _YOUTUBE_WAITERS_TTL = 3 * 60 * 60  # generous vs. worst-case retry budget (~2.5h)
 _SOCIAL_WAITERS_TTL = 90 * 60  # ~1.5h
 
@@ -248,7 +273,10 @@ async def _process_social_url(message: Message, url: str) -> None:
 
 @router.message(F.text.regexp(r"https?://"))
 async def embed_social(message: types.Message) -> None:
-    urls = [u for u in _URL_RE.findall(message.text) if not _YOUTUBE_URL_RE.match(u)]
+    urls = [
+        u for u in _URL_RE.findall(message.text)
+        if not _YOUTUBE_URL_RE.match(u) and not _NOT_MEDIA_HOST_RE.match(u)
+    ]
     if not urls:
         return
 
