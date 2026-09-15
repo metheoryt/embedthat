@@ -14,7 +14,11 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "pytubefix>=11.1.0",
     "redis[hiredis]>=5.2.1",
-    "yt-dlp>=2026.7.4",
+    # Floor moved with the lock on purpose: 2026.7.4's Instagram extractor
+    # resolved carousel posts to a child image item instead of the video, which
+    # is 14 of the 44 jobs dead-lettered by 2026-09-15. A floor left behind the
+    # lock lets any resolve that ignores uv.lock land back on the broken one.
+    "yt-dlp>=2026.8.19",
 ]
 
 [tool.pyright]
