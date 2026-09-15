@@ -381,6 +381,23 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
 - **A real share from the app DOES carry `img_index`** — confirmed against the
   untouched link. A link pasted without one has usually been edited by hand, so
   do not conclude "shares have no index" from a bare URL.
+- **The audio probe is the gate in front of the whole social path, and it met
+  the photo too.** `_process_social_link_async` calls `probe_link` before any
+  download, so a carousel with a still failed as "Couldn't process this link"
+  and never reached the downloader — the carousel code was fine and unreachable.
+  Both probes needed `ignore_no_formats_error`: the flat one in `probe_link`,
+  and `_deep_probe`, which for a carousel re-extracts the post itself because
+  the first flat entry's `url` IS the post URL. Any future "why is this link
+  rejected" starts at that classification, not at `download_social_video`.
+- **`ignore_no_formats_error` makes `_is_audio_only` lie if you let it.** With
+  the flag, `_deep_probe` returns a playlist wrapper that has no formats of its
+  own, and the old `formats or [info]` fallback read that as "no video track" —
+  classifying a whole video carousel as audio. It now judges the first entry
+  that actually has formats.
+- **`embedthat:trixie` on this box is stale — yt-dlp 2026.07.04, while the
+  shipped image is on 2026.08.19.** Verify against `metheoryt/embedthat:latest`
+  (docker pull first), not the local tag; a yt-dlp behaviour difference is
+  exactly what these probes turn on.
 - **Telegram accepts a mixed photo+video media group**, verified by sending
   10 + 3 into the dump chat. The cap is 10 per group, so a 13-item post is two
   messages.
