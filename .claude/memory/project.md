@@ -374,7 +374,17 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
 - **Telegram accepts a mixed photo+video media group**, verified by sending
   10 + 3 into the dump chat. The cap is 10 per group, so a 13-item post is two
   messages.
-- **Known limitation: a carousel is all-or-nothing.** One entry failing the
-  download pass raises `SocialDownloadError` for the post, so a 403 on item 7
-  delivers zero of thirteen — and only after the full retry budget, since
-  `http error 403` is in `_TRANSIENT_MARKERS`.
+- **A carousel delivers partially.** `ignoreerrors="only_download"` on the
+  download pass skips an item whose media 403s instead of aborting the post;
+  the failed positions are re-asked for once, on their own, and whatever is
+  still missing is named in the caption. Scoped to `only_download` on purpose —
+  an *extraction* error still raises, so a login wall keeps reaching
+  `extract_info`'s cookie retry. Empty is still a failure: `SocialDownloadError`
+  if nothing at all came through.
+- **Never infer "video vs photo" from whether a file landed on disk.** The kind
+  comes from the metadata pass (`entry["formats"]` non-empty) and nothing else.
+  Deciding it by file existence means a video whose download failed falls through
+  to the photo branch and is delivered as its own poster frame: forcing one item
+  of the 13-item post to fail produced 11 videos + 2 photos and reported nothing
+  missing, instead of 12 items and a gap at position 5. Caught only because the
+  probe asserted the counts.

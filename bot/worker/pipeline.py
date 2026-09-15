@@ -224,6 +224,7 @@ async def _handle_social_video(bot: Bot, video: SocialVideoData) -> SocialVideoD
 
         video.video_id = result.video_id
         video.title = result.title
+        video.missing = result.missing
         video.origin = result.extractor.lower()
 
         sendable: list[MediaFile] = []

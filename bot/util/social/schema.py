@@ -49,6 +49,7 @@ class SocialVideoData(BaseModel):
     link: str
     origin: str = ""
     items: list[MediaItem] = Field(default_factory=list)
+    missing: list[int] = Field(default_factory=list)  # carousel positions that failed to download
     video_id: str | None = None
     width: int | None = None
     height: int | None = None
@@ -65,7 +66,12 @@ class SocialVideoData(BaseModel):
     def caption(self) -> str:
         # title_line = f"{self.title}\n" if self.title else ""
         # return f"{title_line}{self.link}\nby @{settings.bot_username}"
-        return self.link
+        if not self.missing:
+            return self.link
+        # A partial carousel has to say so. Silently delivering 12 of 13 looks
+        # exactly like a post that only ever had 12 items.
+        positions = ", ".join(f"#{pos}" for pos in self.missing)
+        return f"{self.link}\n\u26a0\ufe0f Couldn't download {len(self.missing)} item(s): {positions}"
 
     def _groups(self) -> list[list[MediaItem]]:
         return [self.items[i : i + _MEDIA_GROUP_LIMIT] for i in range(0, len(self.items), _MEDIA_GROUP_LIMIT)]

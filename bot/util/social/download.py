@@ -52,6 +52,8 @@ class DownloadResult:
     video_id: str  # the post's own id, not a carousel item's
     title: str
     extractor: str  # yt-dlp extractor key, e.g. "TikTok", "Instagram", "Twitter"
+    missing: list[int]  # carousel positions that never produced a file
+    total: int  # items the post claims to have, including the missing ones
 
 
 def carousel_index(url: str) -> int | None:
@@ -120,8 +122,24 @@ def _downloaded_path(entry: dict[str, Any], output_dir: Path) -> Path | None:
     return None
 
 
-def _media_file(entry: dict[str, Any], file_path: Path | None, output_dir: Path) -> MediaFile | None:
-    if file_path is not None and file_path.exists():
+def _media_file(
+    entry: dict[str, Any],
+    file_path: Path | None,
+    output_dir: Path,
+    *,
+    is_video: bool,
+) -> MediaFile | None:
+    """Turns one enumerated entry into a sendable file, or None if it failed.
+
+    `is_video` comes from the metadata pass, never from whether a file happens to
+    be on disk. Inferring it the other way round substitutes a video's own poster
+    frame for the video whenever its download fails -- measured: forcing one item
+    of a 13-item post to fail produced 11 videos + 2 photos and reported nothing
+    missing, instead of 12 items and a gap at position 5.
+    """
+    if is_video:
+        if file_path is None or not file_path.exists():
+            return None
         width = entry.get("width") or 0
         height = entry.get("height") or 0
         if not width or not height:
@@ -159,6 +177,50 @@ def _entries_of(info: dict[str, Any]) -> list[dict[str, Any] | None]:
     return [info]
 
 
+def _download_positions(url: str, positions: list[int], output_dir: Path, max_res: int) -> dict[str, Path]:
+    """Downloads the given 1-based playlist positions, returning entry id -> file.
+
+    `ignoreerrors="only_download"` is what makes a carousel survive one bad item:
+    a position whose media 403s is skipped instead of aborting the post. Scoped to
+    downloads on purpose -- an *extraction* error still raises, so a login wall
+    reaches `extract_info`'s cookie retry rather than being silently swallowed.
+
+    Nothing is inferred from what comes back: files are matched to entries by id,
+    so a missing position stays missing instead of being filled by its neighbour.
+    """
+    opts = _base_opts(max_res)
+    opts["outtmpl"] = str(output_dir / "%(id)s.%(ext)s")
+    opts["playlist_items"] = ",".join(str(pos) for pos in positions)
+    opts["ignoreerrors"] = "only_download"
+    # Re-encode to H.264/AAC with iOS-compatible settings:
+    # - yuv420p: iOS requires 8-bit 4:2:0 chroma
+    # - faststart: moves moov atom to front so iOS can start playback immediately
+    # - profile main: avoids B-frame issues on some decoders
+    # - scale: this merger step is already a mandatory re-encode, so capping height here is free
+    opts["postprocessor_args"] = {
+        "merger": [
+            "-vcodec", "libx264",
+            "-profile:v", "main",
+            "-pix_fmt", "yuv420p",
+            "-vf", f"scale=-2:'min({max_res},ih)'",
+            "-acodec", "aac",
+            "-movflags", "+faststart",
+        ],
+    }
+    done = extract_info(url, opts, SocialDownloadError, download=True)
+    if done is None:
+        return {}
+
+    found: dict[str, Path] = {}
+    for entry in _entries_of(done):
+        if entry is None:
+            continue
+        path = _downloaded_path(entry, output_dir)
+        if path is not None and path.exists():
+            found[entry["id"]] = path
+    return found
+
+
 def download_social_video(url: str, output_dir: Path, max_res: int = settings.max_video_resolution) -> DownloadResult:
     """
     Synchronous yt-dlp download. Call via asyncio.to_thread in the handler.
@@ -192,47 +254,36 @@ def download_social_video(url: str, output_dir: Path, max_res: int = settings.ma
     # maps straight onto `playlist_items` with no off-by-one.
     first = index or 1
     entries = {first + offset: entry for offset, entry in enumerate(_entries_of(info)) if entry is not None}
-    video_positions = [pos for pos, entry in entries.items() if entry.get("formats")]
+    # The one place "is this a video?" is decided, so the download path and the
+    # missing-item accounting can never disagree about it.
+    is_video = {pos: bool(entry.get("formats")) for pos, entry in entries.items()}
+    video_positions = [pos for pos in sorted(entries) if is_video[pos]]
 
     downloaded: dict[str, Path] = {}
     if video_positions:
-        download_opts = _base_opts(max_res)
-        download_opts["outtmpl"] = str(output_dir / "%(id)s.%(ext)s")
-        download_opts["playlist_items"] = ",".join(str(pos) for pos in video_positions)
-        # Re-encode to H.264/AAC with iOS-compatible settings:
-        # - yuv420p: iOS requires 8-bit 4:2:0 chroma
-        # - faststart: moves moov atom to front so iOS can start playback immediately
-        # - profile main: avoids B-frame issues on some decoders
-        # - scale: this merger step is already a mandatory re-encode, so capping height here is free
-        download_opts["postprocessor_args"] = {
-            "merger": [
-                "-vcodec", "libx264",
-                "-profile:v", "main",
-                "-pix_fmt", "yuv420p",
-                "-vf", f"scale=-2:'min({max_res},ih)'",
-                "-acodec", "aac",
-                "-movflags", "+faststart",
-            ],
-        }
-        done = extract_info(url, download_opts, SocialDownloadError, download=True)
-        if done is None:
-            raise SocialDownloadError(f"Could not download media from {url}")
-        for entry in _entries_of(done):
-            if entry is None:
-                continue
-            path = _downloaded_path(entry, output_dir)
-            if path is not None and path.exists():
-                downloaded[entry["id"]] = path
+        downloaded = _download_positions(url, video_positions, output_dir, max_res)
+        retry = [pos for pos in video_positions if (entries[pos].get("id") or "") not in downloaded]
+        if retry:
+            # One narrow second attempt, for the failed positions only. A 403 on a
+            # single item is common enough on Instagram to be worth re-asking for,
+            # and asking for just those costs a fraction of redoing the post --
+            # which is what raising here would make dramatiq do.
+            log.warning("retrying %d failed position(s) of %s: %s", len(retry), url, retry)
+            downloaded.update(_download_positions(url, retry, output_dir, max_res))
 
     files: list[MediaFile] = []
+    missing: list[int] = []
     for pos in sorted(entries):
         entry = entries[pos]
-        media = _media_file(entry, downloaded.get(entry.get("id") or ""), output_dir)
+        media = _media_file(entry, downloaded.get(entry.get("id") or ""), output_dir, is_video=is_video[pos])
         if media is None:
             log.warning("carousel position %d of %s yielded no media", pos, url)
+            missing.append(pos)
             continue
         files.append(media)
 
+    # Partial is a result; empty is a failure. Raising only when nothing at all
+    # came through is what keeps one bad item from costing the other twelve.
     if not files:
         raise SocialDownloadError(f"No downloadable media found in {url}")
 
@@ -241,10 +292,13 @@ def download_social_video(url: str, output_dir: Path, max_res: int = settings.ma
         video_id=info["id"],
         title=info.get("title") or "",
         extractor=info.get("extractor_key") or "unknown",
+        missing=missing,
+        total=len(entries),
     )
     log.info(
-        "downloaded %d item(s) (%d photo) for %s",
+        "downloaded %d/%d item(s) (%d photo) for %s",
         len(files),
+        len(entries),
         sum(1 for f in files if f.kind == "photo"),
         url,
     )
