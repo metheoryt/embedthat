@@ -1,6 +1,10 @@
 import logging
+import shutil
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Literal
+from urllib.parse import parse_qs, urlparse
 
 import ffmpeg
 
@@ -10,6 +14,8 @@ from bot.util.ytdlp import extract_info
 from .exc import SocialDownloadError
 
 log = logging.getLogger(__name__)
+
+_PHOTO_FETCH_TIMEOUT = 30
 
 
 def _probe_dimensions(file_path: Path) -> tuple[int, int]:
@@ -32,38 +38,173 @@ def _probe_duration(file_path: Path) -> int:
 
 
 @dataclass
-class DownloadResult:
+class MediaFile:
     file_path: Path
-    video_id: str
+    kind: Literal["video", "photo"]
     width: int
     height: int
+    duration: int  # seconds; always 0 for a photo
+
+
+@dataclass
+class DownloadResult:
+    files: list[MediaFile]
+    video_id: str  # the post's own id, not a carousel item's
     title: str
-    duration: int  # seconds
     extractor: str  # yt-dlp extractor key, e.g. "TikTok", "Instagram", "Twitter"
 
 
-def download_social_video(url: str, output_dir: Path, max_res: int = settings.max_video_resolution) -> DownloadResult:
-    """
-    Synchronous yt-dlp download. Call via asyncio.to_thread in the handler.
+def carousel_index(url: str) -> int | None:
+    """The 1-based carousel position named by `?img_index=N`, or None.
 
-    Raises SocialDownloadError for unrecoverable failures (private/removed/geo-blocked),
-    TransientDownloadError for the ones worth another attempt (429/5xx/timeouts).
+    yt-dlp ignores the parameter itself -- measured on 2026.07.04 and on the
+    pinned 2026.08.19, both of which return the full 13-entry playlist for
+    `?img_index=3` and for `?img_index=13` alike -- so translating it into
+    `playlist_items` has to happen here.
     """
-    ydl_opts = {
-        "outtmpl": str(output_dir / "%(id)s.%(ext)s"),
+    raw = parse_qs(urlparse(url).query).get("img_index", [None])[0]
+    if raw is None:
+        return None
+    try:
+        position = int(raw)
+    except ValueError:
+        log.warning("ignoring non-numeric img_index=%r in %s", raw, url)
+        return None
+    return position if position >= 1 else None
+
+
+def _photo_headers() -> dict[str, str]:
+    if settings.cookies_user_agent:
+        return {"User-Agent": settings.cookies_user_agent}
+    return {}
+
+
+def _download_photo(entry: dict[str, Any], output_dir: Path) -> Path | None:
+    """Fetches a carousel still, which yt-dlp cannot download as media.
+
+    A photo entry resolves to zero formats -- the extractor raises "No video
+    formats found!" and the item is dropped -- so the picture only ever reaches
+    us as the entry's thumbnail list. Instagram publishes no width, height or
+    preference on any of those, so ordering is the only handle on "the full-size
+    one"; yt-dlp sorts thumbnails worst-to-best, making the last the original.
+    Real dimensions come from the bytes afterwards, which also guards against
+    the extractor reordering the list.
+    """
+    thumbnails = [t for t in (entry.get("thumbnails") or []) if t.get("url")]
+    if not thumbnails:
+        return None
+    url = thumbnails[-1]["url"]
+    # The URL is usually named .heic while the CDN serves JPEG; trust the bytes.
+    destination = output_dir / f"{entry.get('id') or 'photo'}.jpg"
+    request = urllib.request.Request(url, headers=_photo_headers())  # noqa: S310 -- https CDN URL from yt-dlp
+    try:
+        with urllib.request.urlopen(request, timeout=_PHOTO_FETCH_TIMEOUT) as response:  # noqa: S310
+            with destination.open("wb") as fh:
+                shutil.copyfileobj(response, fh)
+    except Exception as e:
+        log.warning("failed to fetch carousel photo %s: %r", url, e)
+        return None
+    return destination
+
+
+def _downloaded_path(entry: dict[str, Any], output_dir: Path) -> Path | None:
+    for download in entry.get("requested_downloads") or []:
+        filepath = download.get("filepath")
+        if filepath:
+            return Path(filepath)
+    entry_id = entry.get("id")
+    if entry_id:
+        candidate = output_dir / f"{entry_id}.mp4"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _media_file(entry: dict[str, Any], file_path: Path | None, output_dir: Path) -> MediaFile | None:
+    if file_path is not None and file_path.exists():
+        width = entry.get("width") or 0
+        height = entry.get("height") or 0
+        if not width or not height:
+            width, height = _probe_dimensions(file_path)
+        duration = int(entry.get("duration") or 0) or _probe_duration(file_path)
+        return MediaFile(file_path=file_path, kind="video", width=width, height=height, duration=duration)
+
+    photo_path = _download_photo(entry, output_dir)
+    if photo_path is None:
+        log.warning("carousel entry %s yielded neither video nor photo", entry.get("id"))
+        return None
+    width, height = _probe_dimensions(photo_path)
+    return MediaFile(file_path=photo_path, kind="photo", width=width, height=height, duration=0)
+
+
+def _base_opts(max_res: int) -> dict[str, Any]:
+    return {
         "format": (
             f"worstvideo[ext=mp4][height>={max_res}]+bestaudio[ext=m4a]/"
             f"worst[ext=mp4][height>={max_res}]/best[ext=mp4]/best"
         ),
         "merge_output_format": "mp4",
         "quiet": True,
-        "noplaylist": True,
+        # `noplaylist` is deliberately absent. A carousel URL *is* the playlist, so
+        # the flag never narrowed anything: with it set, all 13 entries of a 13-item
+        # post still came back, 12 were downloaded and 11 thrown away.
+        # `playlist_items` is the option that actually selects.
+        "ignore_no_formats_error": True,
+    }
+
+
+def _entries_of(info: dict[str, Any]) -> list[dict[str, Any] | None]:
+    if info.get("_type") == "playlist":
+        return list(info.get("entries") or [])
+    return [info]
+
+
+def download_social_video(url: str, output_dir: Path, max_res: int = settings.max_video_resolution) -> DownloadResult:
+    """
+    Synchronous yt-dlp download. Call via asyncio.to_thread in the handler.
+
+    Returns every item of the post, in carousel order, unless the URL carries an
+    `img_index` -- then just that one.
+
+    Two passes, deliberately. A carousel still resolves to zero formats, and
+    `ignore_no_formats_error` only survives the metadata stage: during an actual
+    download the extractor's "No video formats found!" aborts the whole post,
+    taking the twelve healthy videos beside it with it. So the first pass
+    enumerates and classifies without downloading, and the second asks only for
+    the positions that really are video. The alternative -- `ignoreerrors` over a
+    single download pass -- would also swallow genuine failures, which is exactly
+    where a wrong item silently substitutes for a missing one.
+
+    Raises SocialDownloadError for unrecoverable failures (private/removed/geo-blocked),
+    TransientDownloadError for the ones worth another attempt (429/5xx/timeouts).
+    """
+    index = carousel_index(url)
+    probe_opts = _base_opts(max_res)
+    if index is not None:
+        probe_opts["playlist_items"] = str(index)
+
+    info = extract_info(url, probe_opts, SocialDownloadError, download=False)
+    if info is None:
+        raise SocialDownloadError(f"Could not extract media from {url}")
+
+    # Positions are 1-based and match the carousel: a 12-video + 1-photo post
+    # enumerates as 13 entries with the still in its real place, so `img_index`
+    # maps straight onto `playlist_items` with no off-by-one.
+    first = index or 1
+    entries = {first + offset: entry for offset, entry in enumerate(_entries_of(info)) if entry is not None}
+    video_positions = [pos for pos, entry in entries.items() if entry.get("formats")]
+
+    downloaded: dict[str, Path] = {}
+    if video_positions:
+        download_opts = _base_opts(max_res)
+        download_opts["outtmpl"] = str(output_dir / "%(id)s.%(ext)s")
+        download_opts["playlist_items"] = ",".join(str(pos) for pos in video_positions)
         # Re-encode to H.264/AAC with iOS-compatible settings:
         # - yuv420p: iOS requires 8-bit 4:2:0 chroma
         # - faststart: moves moov atom to front so iOS can start playback immediately
         # - profile main: avoids B-frame issues on some decoders
         # - scale: this merger step is already a mandatory re-encode, so capping height here is free
-        "postprocessor_args": {
+        download_opts["postprocessor_args"] = {
             "merger": [
                 "-vcodec", "libx264",
                 "-profile:v", "main",
@@ -72,35 +213,39 @@ def download_social_video(url: str, output_dir: Path, max_res: int = settings.ma
                 "-acodec", "aac",
                 "-movflags", "+faststart",
             ],
-        },
-    }
-    info = extract_info(url, ydl_opts, SocialDownloadError, download=True)
-    if info is None:
-        raise SocialDownloadError(f"Could not extract media from {url}")
+        }
+        done = extract_info(url, download_opts, SocialDownloadError, download=True)
+        if done is None:
+            raise SocialDownloadError(f"Could not download media from {url}")
+        for entry in _entries_of(done):
+            if entry is None:
+                continue
+            path = _downloaded_path(entry, output_dir)
+            if path is not None and path.exists():
+                downloaded[entry["id"]] = path
 
-    video_id = info["id"]
-    file_path = output_dir / f"{video_id}.mp4"
-    if not file_path.exists():
-        # Carousel items (e.g. Instagram img_index) get a per-item ID different
-        # from the parent post ID, so the expected filename won't match.
-        mp4_files = list(output_dir.glob("*.mp4"))
-        if not mp4_files:
-            raise SocialDownloadError(f"Downloaded file not found: {file_path}")
-        file_path = mp4_files[0]
+    files: list[MediaFile] = []
+    for pos in sorted(entries):
+        entry = entries[pos]
+        media = _media_file(entry, downloaded.get(entry.get("id") or ""), output_dir)
+        if media is None:
+            log.warning("carousel position %d of %s yielded no media", pos, url)
+            continue
+        files.append(media)
 
-    width = info.get("width") or 0
-    height = info.get("height") or 0
-    if not width or not height:
-        width, height = _probe_dimensions(file_path)
+    if not files:
+        raise SocialDownloadError(f"No downloadable media found in {url}")
 
     dr = DownloadResult(
-        file_path=file_path,
-        video_id=video_id,
-        width=width,
-        height=height,
+        files=files,
+        video_id=info["id"],
         title=info.get("title") or "",
-        duration=int(info.get("duration") or 0) or _probe_duration(file_path),
         extractor=info.get("extractor_key") or "unknown",
     )
-    log.info("downloaded %s", dr)
+    log.info(
+        "downloaded %d item(s) (%d photo) for %s",
+        len(files),
+        sum(1 for f in files if f.kind == "photo"),
+        url,
+    )
     return dr

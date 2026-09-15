@@ -1,10 +1,13 @@
-from .download import DownloadResult, download_social_video
+from .download import DownloadResult, MediaFile, carousel_index, download_social_video
 from .exc import SocialDownloadError
-from .schema import SocialVideoData
+from .schema import MediaItem, SocialVideoData
 
 __all__ = [
     "DownloadResult",
+    "MediaFile",
+    "MediaItem",
     "SocialDownloadError",
     "SocialVideoData",
+    "carousel_index",
     "download_social_video",
 ]

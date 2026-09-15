@@ -12,9 +12,9 @@ from bot.events.signals import on_social_video_fail, on_yt_video_fail
 from bot.util.audio.download import download_track
 from bot.util.audio.exc import AudioDownloadError
 from bot.util.audio.schema import AudioTrackData
-from bot.util.social.download import download_social_video
+from bot.util.social.download import MediaFile, download_social_video
 from bot.util.social.exc import SocialDownloadError
-from bot.util.social.schema import SocialVideoData
+from bot.util.social.schema import MediaItem, SocialVideoData
 from bot.util.youtube.exc import YouTubeError
 from bot.util.youtube.schema import YouTubeVideoData
 from bot.util.youtube.video import (
@@ -47,6 +47,86 @@ async def _upload_parts_to_dump_chat(bot: Bot, file_paths: list[Path], width: in
         log.info("sent %s", file_path)
         file_ids.append(media_message.video.file_id)
     return file_ids
+
+
+async def _send_one_to_dump_chat(bot: Bot, media: MediaFile) -> types.Message:
+    for i in range(3):
+        try:
+            if media.kind == "photo":
+                return await bot.send_photo(
+                    settings.dump_chat_id,
+                    types.FSInputFile(media.file_path),
+                )
+            return await bot.send_video(
+                settings.dump_chat_id,
+                types.FSInputFile(media.file_path),
+                width=media.width,
+                height=media.height,
+            )
+        except TelegramNetworkError:
+            if i == 2:
+                raise
+            log.warning("failed to send a media file, retrying in 2 seconds")
+            await asyncio.sleep(2)
+    raise RuntimeError("unreachable: the retry loop above always returns or re-raises")
+
+
+async def _upload_media_to_dump_chat(bot: Bot, files: list[MediaFile]) -> list[MediaItem]:
+    """Parks every item in the dump chat and returns the file ids, in order.
+
+    Kept separate from `_upload_parts_to_dump_chat`, which YouTube still uses:
+    that one sends N slices of one video under a single width/height, this one
+    sends N independent items that each carry their own kind and dimensions.
+    """
+    items: list[MediaItem] = []
+    for media in files:
+        media_message = await _send_one_to_dump_chat(bot, media)
+        log.info("sent %s", media.file_path)
+
+        if media.kind == "photo":
+            sizes = media_message.photo
+            if not sizes:
+                raise SocialDownloadError(f"Telegram returned no photo for {media.file_path}")
+            file_id = sizes[-1].file_id
+        else:
+            video = media_message.video
+            if video is None:
+                raise SocialDownloadError(f"Telegram returned no video for {media.file_path}")
+            file_id = video.file_id
+        items.append(MediaItem(file_id=file_id, kind=media.kind, width=media.width, height=media.height))
+    return items
+
+
+def _split_oversized(media: MediaFile, output_dir: Path) -> list[MediaFile]:
+    """Cuts one too-large video into <= 10 sendable parts.
+
+    Each item gets its own output directory: `split_video` names parts after the
+    input, and a carousel runs this more than once into the same temp tree.
+    """
+    part_dir = output_dir / f"parts-{media.file_path.stem}"
+    part_dir.mkdir(parents=True, exist_ok=True)
+
+    file_size = media.file_path.stat().st_size
+    n_parts = math.ceil(file_size / MAX_FILE_SIZE_BYTES)
+    file_paths = split_video(
+        duration_seconds=media.duration,
+        input_path=media.file_path,
+        output_dir=part_dir,
+        n_parts=n_parts,
+    )
+    while any(p.stat().st_size > MAX_FILE_SIZE_BYTES for p in file_paths):
+        n_parts += 1
+        if n_parts > 10:
+            raise SocialDownloadError("Video too large, cannot split into <= 10 parts")
+        file_paths = split_video(
+            duration_seconds=media.duration,
+            input_path=media.file_path,
+            output_dir=part_dir,
+            n_parts=n_parts,
+        )
+    return [
+        MediaFile(file_path=p, kind="video", width=media.width, height=media.height, duration=0) for p in file_paths
+    ]
 
 
 async def handle_youtube_video(bot: Bot, video: YouTubeVideoData) -> YouTubeVideoData:
@@ -143,35 +223,23 @@ async def _handle_social_video(bot: Bot, video: SocialVideoData) -> SocialVideoD
             raise exc
 
         video.video_id = result.video_id
-        video.width = result.width
-        video.height = result.height
         video.title = result.title
         video.origin = result.extractor.lower()
 
-        file_size = result.file_path.stat().st_size
-        if file_size <= MAX_FILE_SIZE_BYTES:
-            file_paths = [result.file_path]
-        else:
-            n_parts = math.ceil(file_size / MAX_FILE_SIZE_BYTES)
-            file_paths = split_video(
-                duration_seconds=result.duration,
-                input_path=result.file_path,
-                output_dir=tmp_path,
-                n_parts=n_parts,
-            )
-            while any(p.stat().st_size > MAX_FILE_SIZE_BYTES for p in file_paths):
-                n_parts += 1
-                if n_parts > 10:
-                    raise SocialDownloadError("Video too large, cannot split into <= 10 parts")
-                file_paths = split_video(
-                    duration_seconds=result.duration,
-                    input_path=result.file_path,
-                    output_dir=tmp_path,
-                    n_parts=n_parts,
-                )
+        sendable: list[MediaFile] = []
+        for media in result.files:
+            if media.kind == "photo" or media.file_path.stat().st_size <= MAX_FILE_SIZE_BYTES:
+                sendable.append(media)
+                continue
+            sendable.extend(_split_oversized(media, tmp_path))
 
-        log.info("sending %d part(s) to dump chat for %s", len(file_paths), video.link)
-        video.file_ids = await _upload_parts_to_dump_chat(bot, file_paths, video.width, video.height)
+        # Kept for the cached-metadata path; the send path now reads each item's
+        # own dimensions, which a carousel does not share.
+        video.width = sendable[0].width
+        video.height = sendable[0].height
+
+        log.info("sending %d item(s) to dump chat for %s", len(sendable), video.link)
+        video.items = await _upload_media_to_dump_chat(bot, sendable)
         return video
 
 
