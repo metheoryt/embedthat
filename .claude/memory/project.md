@@ -308,9 +308,27 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   not fixable by exporting a jar.
 - Live at `~/my/vps/homeserver/embedthat/cookies/cookies.txt` on latitude
   (burner Instagram account, placed 2026-09-08). yt-dlp rewrites it in place on
-  close **preserving uid 1000**, so a re-export is a plain `scp` over it. The
-  write-back legitimately drops session-only cookies whose expiry is `0` (`rur`);
-  a shorter file after the first download is not corruption.
+  close **preserving uid 1000**. The write-back legitimately drops session-only
+  cookies whose expiry is `0` (`rur`); a shorter file after the first download is
+  not corruption.
+- **The jar is MULTI-SITE — never `scp` a single-site export over it.** It also
+  carries tiktok, vk, x.com, reddit, soundcloud and threads cookies, and a
+  browser's per-site export would silently drop them all. Merge instead: strip
+  the target domain's lines from the live jar, append the new export's, then `cp`
+  onto the existing file so uid 1000 and mode 600 survive. Back the old one up
+  first (`cookies.txt.bak-<date>`).
+- **`grep -c sessionid` is THE check on any Instagram export — the jar placed on
+  2026-09-08 never had one** (found 2026-09-15, after Instagram warned about
+  automated activity on the burner). `sessionid` is HttpOnly, so any exporter
+  reading `document.cookie` cannot see it and writes a jar that looks complete —
+  `csrftoken` and `ds_user_id` are there, and `mid`/`datr`/`ig_did` still tie
+  every request to the account. Use an extension that exports HttpOnly cookies
+  (Get cookies.txt LOCALLY). Nobody noticed for a week because public reels need
+  no session at all, so the success rate looked fine.
+- **Cookies are spent only behind a login wall** since `e51e2fb`: `extract_info()`
+  in `bot/util/ytdlp.py` runs anonymously and retries with the jar when
+  `is_login_wall()` matches. Consequence — the jar is refreshed only by walled
+  posts now, not by every request.
 - **Discriminate bad-jar from stale-extractor before re-exporting.** yt-dlp in
   the image lags (2026.07.04 as of this writing) and the Instagram extractor
   churns fast. Control: `https://www.instagram.com/reel/Dc8fZX9idsQ/` needs no
