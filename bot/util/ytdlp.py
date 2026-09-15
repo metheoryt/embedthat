@@ -4,14 +4,18 @@ Exists so the cookie jar is configured in ONE place: yt-dlp is constructed at
 four separate call sites (`probe_link`, `_deep_probe`, `download_track`,
 `download_social_video`) whose other options legitimately differ, and a cookie
 file that only reaches three of them would fail in a way that looks random.
+All four now go through `extract_info()` here, which is what keeps that true.
 
-Cookies are opt-in. With no `COOKIES_FILE` set -- or with the file missing --
-`cookie_opts()` returns `{}` and every call site behaves exactly as it did
-before this module existed.
+Cookies are opt-in AND deferred. With no `COOKIES_FILE` set -- or with the file
+missing -- `cookie_opts()` returns `{}`; with one set, the jar is still spent
+only on the requests that actually demand a login. See `extract_info`.
 """
 
 import logging
-from typing import Any
+from typing import Any, cast
+
+import yt_dlp
+from yt_dlp.utils import DownloadError
 
 from bot.config import settings
 
@@ -21,9 +25,11 @@ log = logging.getLogger(__name__)
 # "this post is gone / has no video in it". Matched case-insensitively against
 # the DownloadError text.
 #
-# Deliberately narrow: the only consumer is the stale-cookie admin alert, whose
-# entire value is that it is rare. A marker broad enough to also match ordinary
-# private/removed posts would turn the alert into noise and get it muted.
+# Since `extract_info` retries behind the jar, these markers now do double duty:
+# they pick the requests worth spending the session on, not just the ones worth
+# alerting about. Still deliberately narrow -- a marker broad enough to also
+# match ordinary private/removed posts would both flood the admin alert and burn
+# an authenticated retry on every deleted link someone pastes.
 _LOGIN_WALL_MARKERS = (
     "log in for access",
     "empty media response",
@@ -50,7 +56,63 @@ def cookie_opts() -> dict[str, Any]:
     if not path.exists():
         log.warning("COOKIES_FILE is set to %s, but no such file; continuing without cookies", path)
         return {}
-    return {"cookiefile": str(path)}
+    opts: dict[str, Any] = {"cookiefile": str(path)}
+    if settings.cookies_user_agent:
+        # The jar and the User-Agent are one identity: a session cookie exported
+        # from the operator's browser but replayed under yt-dlp's built-in UA
+        # (Windows Chrome, whatever the exporter actually ran) is a mismatch the
+        # site can see. Unset leaves yt-dlp's default, i.e. the old behaviour.
+        opts["http_headers"] = {"User-Agent": settings.cookies_user_agent}
+    return opts
+
+
+def extract_info(
+    url: str,
+    opts: dict[str, Any],
+    permanent: type[Exception],
+    *,
+    download: bool = False,
+) -> dict[str, Any] | None:
+    """Runs yt-dlp's `extract_info`, reaching for the cookie jar only if the site
+    demands a login. The single entry point for all four call sites.
+
+    Anonymous first, authenticated on retry. Every call used to carry the jar, so
+    the burner account behind it signed for traffic that never needed a session
+    -- public reels, TikToks, both probes -- and Instagram flagged the account
+    for automated activity (2026-09-15). Most links need no login at all, so the
+    jar is now spent only where it buys something.
+
+    Two costs, both accepted. One extra request per walled post: the anonymous
+    attempt dies at extraction, before any bytes, and only then do we re-ask with
+    cookies. And the jar is refreshed less often -- yt-dlp writes it back on
+    close, so walled posts alone now keep the session alive where before every
+    request did. A jar that goes stale anyway still surfaces loudly, through
+    `_alert_if_cookies_stale`.
+
+    Raises the caller's own `permanent` class or `TransientDownloadError`, per
+    `wrap_download_error`. A login wall that survives the retry is permanent: the
+    jar had its chance.
+    """
+    jar = cookie_opts()
+    try:
+        return _extract(url, opts, download)
+    except DownloadError as e:
+        if not jar or not is_login_wall(e):
+            raise wrap_download_error(e, permanent) from e
+        log.info("login wall on %s, retrying with the cookie jar", url)
+
+    try:
+        return _extract(url, {**opts, **jar}, download)
+    except DownloadError as e:
+        raise wrap_download_error(e, permanent) from e
+
+
+def _extract(url: str, opts: Any, download: bool) -> dict[str, Any] | None:
+    # `opts: Any`, not `dict[str, Any]`: yt-dlp types its constructor against a
+    # `_Params` TypedDict that our option dicts do not satisfy structurally. The
+    # call sites carried the same annotation for the same reason.
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        return cast(dict[str, Any] | None, ydl.extract_info(url, download=download))
 
 
 def is_login_wall(error: object) -> bool:

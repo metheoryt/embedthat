@@ -3,10 +3,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import ffmpeg
-import yt_dlp
 
 from bot.config import settings
-from bot.util.ytdlp import cookie_opts, wrap_download_error
+from bot.util.ytdlp import extract_info
 
 from .exc import SocialDownloadError
 
@@ -51,7 +50,6 @@ def download_social_video(url: str, output_dir: Path, max_res: int = settings.ma
     TransientDownloadError for the ones worth another attempt (429/5xx/timeouts).
     """
     ydl_opts = {
-        **cookie_opts(),
         "outtmpl": str(output_dir / "%(id)s.%(ext)s"),
         "format": (
             f"worstvideo[ext=mp4][height>={max_res}]+bestaudio[ext=m4a]/"
@@ -76,11 +74,9 @@ def download_social_video(url: str, output_dir: Path, max_res: int = settings.ma
             ],
         },
     }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        try:
-            info = ydl.extract_info(url, download=True)
-        except yt_dlp.utils.DownloadError as e:
-            raise wrap_download_error(e, SocialDownloadError) from e
+    info = extract_info(url, ydl_opts, SocialDownloadError, download=True)
+    if info is None:
+        raise SocialDownloadError(f"Could not extract media from {url}")
 
     video_id = info["id"]
     file_path = output_dir / f"{video_id}.mp4"

@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     # writable -- yt-dlp saves the refreshed jar back on close.
     cookies_file: Path | None = None
 
+    # Sent alongside the cookie jar, and only alongside it: the session was
+    # created in a real browser, so it should keep presenting as that browser
+    # rather than as yt-dlp's built-in Windows-Chrome default. Copy the exact
+    # User-Agent of whatever browser exported COOKIES_FILE. Unset = yt-dlp's
+    # default, the pre-2026-09-15 behaviour.
+    cookies_user_agent: str | None = None
+
     # populated on setup
     bot_username: str | None = None
     tz: str | None = None

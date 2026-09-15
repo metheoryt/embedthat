@@ -3,12 +3,9 @@ import logging
 from pathlib import Path
 from typing import Any, cast
 
-import yt_dlp
-from yt_dlp.utils import DownloadError
-
 from bot.config import settings
 from bot.util.youtube.video import MAX_FILE_SIZE_BYTES
-from bot.util.ytdlp import cookie_opts, wrap_download_error
+from bot.util.ytdlp import extract_info
 
 from .exc import AudioDownloadError
 from .schema import AudioTrackData
@@ -22,12 +19,8 @@ def _is_audio_only(info: dict[str, Any]) -> bool:
 
 
 def _deep_probe(url: str) -> dict[str, Any]:
-    opts: Any = {"quiet": True, "skip_download": True, "noplaylist": True, **cookie_opts()}
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        try:
-            info = ydl.extract_info(url, download=False)
-        except DownloadError as e:
-            raise wrap_download_error(e, AudioDownloadError) from e
+    opts: Any = {"quiet": True, "skip_download": True, "noplaylist": True}
+    info = extract_info(url, opts, AudioDownloadError)
     if info is None:
         raise AudioDownloadError(f"Could not extract media from {url}")
     return cast(dict[str, Any], info)
@@ -41,13 +34,8 @@ def probe_link(url: str) -> tuple[bool, list[AudioTrackData]]:
     """
     opts: Any = {
         "quiet": True, "skip_download": True, "extract_flat": "in_playlist", "noplaylist": False,
-        **cookie_opts(),
     }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        try:
-            info = ydl.extract_info(url, download=False)
-        except DownloadError as e:
-            raise wrap_download_error(e, AudioDownloadError) from e
+    info = extract_info(url, opts, AudioDownloadError)
 
     if info is None:
         raise AudioDownloadError(f"Could not extract media from {url}")
@@ -108,13 +96,8 @@ def download_track(track: AudioTrackData, output_dir: Path) -> Path:
         "format": "bestaudio/best",
         "quiet": True,
         "noplaylist": True,
-        **cookie_opts(),
     }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        try:
-            info = ydl.extract_info(track.webpage_url, download=True)
-        except DownloadError as e:
-            raise wrap_download_error(e, AudioDownloadError) from e
+    info = extract_info(track.webpage_url, ydl_opts, AudioDownloadError, download=True)
 
     if info is None:
         raise AudioDownloadError(f"Could not download {track.title or track.webpage_url}")
