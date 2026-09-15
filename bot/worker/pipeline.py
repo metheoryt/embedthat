@@ -50,6 +50,27 @@ async def _upload_parts_to_dump_chat(bot: Bot, file_paths: list[Path], width: in
 
 
 async def handle_youtube_video(bot: Bot, video: YouTubeVideoData) -> YouTubeVideoData:
+    """Fires `on_yt_video_fail` for every failure, from exactly one place.
+
+    The fail signal used to sit next to the retry loop's `if exc:`, which meant
+    two whole classes of failure were never counted: `YouTubeError` re-raised as
+    unrecoverable (private, removed, geo-blocked), and anything thrown *after*
+    the download -- the dump-chat upload, where a Telegram-side timeout on
+    2026-09-13 cost a full redundant re-download and left `/stats` reading 0 ✗.
+    Wrapping is what makes "one failure, one count" true regardless of path.
+
+    Still one count per job ATTEMPT, not per link: dramatiq retries call this
+    again. That is the pre-existing meaning of the counter (45 links × 3
+    attempts read as 135 in September) and is deliberately left alone here.
+    """
+    try:
+        return await _handle_youtube_video(bot, video)
+    except Exception:
+        await on_yt_video_fail.send(video.link)
+        raise
+
+
+async def _handle_youtube_video(bot: Bot, video: YouTubeVideoData) -> YouTubeVideoData:
     with tempfile.TemporaryDirectory() as tmp:
         exc = None
         for i in range(3):
@@ -71,7 +92,6 @@ async def handle_youtube_video(bot: Bot, video: YouTubeVideoData) -> YouTubeVide
 
         if exc:
             log.error("finally failed to download youtube link %s: %r", video.link, exc)
-            await on_yt_video_fail.send(video.link)
             raise exc
 
         width, height = get_resolution(stream)
@@ -86,6 +106,22 @@ async def handle_youtube_video(bot: Bot, video: YouTubeVideoData) -> YouTubeVide
 
 
 async def handle_social_video(bot: Bot, video: SocialVideoData) -> SocialVideoData:
+    """Fires `on_social_video_fail` for every failure, from exactly one place.
+
+    Same gap as `handle_youtube_video`, and wider here: `SocialDownloadError` is
+    re-raised as unrecoverable on the line below, so every private account,
+    removed post, carousel-without-video and login wall went uncounted. That is
+    why `fail:social` had fired on three days in the whole 90-day window while
+    messages were steadily dead-lettering.
+    """
+    try:
+        return await _handle_social_video(bot, video)
+    except Exception:
+        await on_social_video_fail.send(video.link)
+        raise
+
+
+async def _handle_social_video(bot: Bot, video: SocialVideoData) -> SocialVideoData:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         exc = None
@@ -104,7 +140,6 @@ async def handle_social_video(bot: Bot, video: SocialVideoData) -> SocialVideoDa
 
         if exc:
             log.error("finally failed to download social link %s: %r", video.link, exc)
-            await on_social_video_fail.send(video.link)
             raise exc
 
         video.video_id = result.video_id
@@ -146,6 +181,11 @@ async def handle_audio_page(bot: Bot, tracks: list[AudioTrackData]) -> int:
     mutating each in place. Returns how many tracks failed and were skipped --
     one bad track (geo-blocked/removed) shouldn't take down the whole page.
     Up to 3 tracks are downloaded/uploaded concurrently.
+
+    Unlike the two video handlers, this fires NO fail signal, so skipped tracks
+    stay invisible to `/stats`. Deliberate: a page that delivered 18 of 20 tracks
+    is not a failed request, and the ✓/✗ counters are per request. Counting
+    tracks would need its own signal and counter key, not a reuse of these.
     """
     semaphore = asyncio.Semaphore(3)
 
