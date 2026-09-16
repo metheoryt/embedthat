@@ -106,15 +106,12 @@ class SocialVideoData(BaseModel):
                 )
             return
 
-        for group_index, group in enumerate(self._groups()):
+        # Every group is self-contained: it replies to the link and carries the
+        # caption. A later group that did neither read as an unrelated dump of
+        # videos -- and on a partial carousel the "couldn't download" warning
+        # only ever reached whoever scrolled back to the first message.
+        for group in self._groups():
             media: list[GroupMedia] = [
-                item.as_input_media(self.caption if group_index == 0 and i == 0 else None)
-                for i, item in enumerate(group)
+                item.as_input_media(self.caption if i == 0 else None) for i, item in enumerate(group)
             ]
-            await bot.send_media_group(
-                chat_id,
-                media,
-                # Only the first group replies; the rest would each quote the same
-                # message and clutter the thread.
-                reply_to_message_id=reply_to_message_id if group_index == 0 else None,
-            )
+            await bot.send_media_group(chat_id, media, reply_to_message_id=reply_to_message_id)
