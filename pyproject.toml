@@ -1,6 +1,6 @@
 [project]
 name = "embedthat"
-version = "0.4.20"
+version = "0.4.21"
 description = "Embed links from social media and youtube into telegram"
 requires-python = ">=3.12"
 dependencies = [
