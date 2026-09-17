@@ -1,4 +1,4 @@
-<!-- KB refreshed against 710e8a5 on 2026-09-12 -->
+<!-- KB refreshed against ff655db on 2026-09-17 -->
 
 # Project memory — embedthat
 
@@ -83,6 +83,23 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   from `yt.streams` succeeding.
   <!-- src: embedthat 710e8a5 | 2026-09-12 -->
 
+- **Attribute a failure wave from the dead-letter queue, never from the suspect
+  that is top of mind.** A month of failures read as "Instagram is throttling the
+  burner" while every single one was YouTube (pytubefix's `ANDROID_VR` default
+  answering with bot detection) -- no 429, no checkpoint, no challenge against the
+  Instagram path anywhere in the log. `/stats` totals cannot separate the two;
+  the dead-lettered messages carry the exception and the URL, so read those
+  first.
+  <!-- src: embedthat d9bcb75 | 2026-09-17 -->
+- **`/stats` counts only what a fail signal fires, and "0 ✗" has been false.**
+  The permanent-failure branches (`YouTubeError`, `SocialDownloadError`) and
+  anything raised *after* a successful download -- a dump-chat upload timeout, for
+  instance -- once bypassed the counter entirely, so jobs dead-lettered while the
+  report read clean. The invariant that fixed it is "one failure, one count, from
+  exactly one place": the handlers are thin wrappers that emit the signal on any
+  escape. A new `except` branch inside them re-opens the hole.
+  <!-- src: embedthat d9bcb75 | 2026-09-17 -->
+
 ## Dependencies & versioning
 
 - Re-run `uv lock` and commit `uv.lock` in the same change as any hand-edited
@@ -148,6 +165,17 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
 - Waiters popped from Redis must be deduped by `chat_id` before delivery in every
   actor, and the inline button is stripped on tap — added after a user received
   two audio files for one request.
+
+- **The `dl:` -> `dl2:` bump retired nothing -- it orphaned another generation.**
+  Nothing in this repo sets a TTL (every write is a bare `redis_client.set(...)`,
+  no `ex=`), so the old `dl:` entries sit in production forever beside the
+  pre-`yt:<id>` set. The comment at `bot/util/social/schema.py:60` claiming the
+  bump "retires them on their own TTL" is simply wrong; a real cleanup is a
+  `SCAN`+`DEL`, not patience. The waiter lists *do* expire
+  (`_SOCIAL_WAITERS_TTL`, 90 min), so the cost of a key-prefix change is paid by
+  whoever pasted a link across the deploy: their waiter hangs under the old key
+  and they get silence, never an error.
+  <!-- src: embedthat c8ad101 | 2026-09-17 -->
 
 ## Behavior & UX decisions
 
@@ -226,6 +254,17 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   <!-- conflicts-with: "`bot/util/aiohttp.py` is dead — zero importers, and its module-level `ClientSession()` would raise on import outside a running loop. Cleanup candidate." -->
   <!-- src: embedthat 1c8ce78 | 2026-09-12 -->
 
+- **Every media group of a carousel replies to the link and carries the caption.**
+  A >10-item post is more than one message; captioning and replying only from the
+  first left the rest as a free-floating pile with no source link, and on a
+  partial carousel the "couldn't download #N" warning reached only the first
+  message. Telegram accepts the same `reply_to_message_id` on several groups and
+  a caption on each -- verified in the dump chat with 13 items (2026-09-16), both
+  groups returned `reply_to` = anchor and the full caption. Accepted cost: the
+  warning repeats on every group.
+  <!-- conflicts-with: "Only the first group replies; the rest would each quote the same message and clutter the thread." -->
+  <!-- src: embedthat 5053c28 | 2026-09-16 -->
+
 ## Repo & deploy conventions
 
 - **`AGENTS.md` is a hand-synced twin of `CLAUDE.md`** — a real file, not a
@@ -277,6 +316,16 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   volume is the one the prod compose warns must never be `down -v`'d. An
   apparently "missing" Tugtainer row for redis is the intended state.
   <!-- src: embedthat 710e8a5 | 2026-09-12 -->
+
+- **`importlib.metadata.version("embedthat")` cannot verify the deployed
+  version** -- it raises `PackageNotFoundError` in the image and in the local
+  `.venv` alike, because `pyproject.toml` carries no `[build-system]`, so uv
+  treats this as a virtual project and installs the dependencies without ever
+  building distribution metadata for the app itself. To check what a running
+  container is actually on, read `/app/pyproject.toml` inside it (or compare
+  `docker inspect --format '{{index .RepoDigests 0}}'` against the published
+  tag).
+  <!-- src: embedthat ff655db | 2026-09-17 -->
 
 ## Base image (measured 2026-09-10)
 
@@ -344,6 +393,37 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   reference post: `https://www.instagram.com/reel/DcMT3ZEtSuN/`.
 - Verify with a real download inside `embedthat-worker-1`, never a metadata
   probe — extraction succeeding with cookies present is not proof of bytes.
+
+- **`COOKIES_USER_AGENT` rides with the jar, and for a Windows-Chrome exporter it
+  is a no-op.** yt-dlp's own default UA already *is* Windows Chrome
+  (`Mozilla/5.0 (Windows NT 10.0; Win64; x64) … Chrome/148.0.0.0 Safari/537.36`
+  on the pinned 2026.08.19), so copying that browser's string in changes nothing --
+  set it only when the jar was exported from a different browser. yt-dlp lays
+  `http_headers` *over* its own, so only the UA moves; `Accept`,
+  `Accept-Language` and `Sec-Fetch-Mode` stay. Ruled out in the same breath and
+  not to be re-raised: keeping a browser tab logged in does nothing for the bot
+  (yt-dlp sends its own requests) and costs a second live session on the account.
+  <!-- src: embedthat e51e2fb | 2026-09-17 -->
+- **The jar's mtime proves nothing about the session.** yt-dlp rewrites the file
+  on every close whether it authenticated or not, so "the file changed an hour
+  ago, the session is live and rotating" is an invalid inference -- it is how a
+  jar with no `sessionid` at all passed for healthy for a week. Only two things
+  prove it: `grep -c sessionid` on the file, and a real download of the walled
+  control post inside `embedthat-worker-1`.
+  <!-- src: embedthat ff655db | 2026-09-17 -->
+- **Changing the account password kills every other session instantly**, so a jar
+  exported before the change is dead the moment it lands -- re-export *after* the
+  password change, not before. The tell is that the fresh export's `sessionid`
+  differs from the installed one; installing in the wrong order costs a silent
+  hour of walled posts failing.
+  <!-- src: embedthat ff655db | 2026-09-17 -->
+- **A rate-limited anonymous attempt never reaches the jar.** Since the
+  anonymous-first change a 429/5xx on the first attempt becomes
+  `TransientDownloadError`, and dramatiq's retry runs anonymously too -- the
+  session is deliberately not spent on a rate limit. Consequence to expect: a
+  post that is *both* walled and rate-limited takes the long path, burning the
+  retry budget anonymously before a cookie is ever offered.
+  <!-- src: embedthat e51e2fb | 2026-09-17 -->
 
 ## Instagram carousels & yt-dlp (measured 2026-09-15, post `DdLlGOuGdlE`, 12 videos + 1 photo)
 

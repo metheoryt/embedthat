@@ -115,6 +115,9 @@ Copy `.env.dist` to `.env` and populate:
 - `MAX_PLAYLIST_TRACKS` — default `200`; an abuse guard on playlist *listing*, not on consumption (page downloads are lazy)
 - `COOKIES_FILE` — optional; path to a Netscape-format `cookies.txt` passed to every yt-dlp call (see `bot/util/ytdlp.py`), unlocking posts that demand a logged-in session. Unset, or pointing at a missing file, means no cookies and the pre-cookie behaviour. **Mount it read-write** — yt-dlp writes the refreshed jar back on close, which is what keeps the session from expiring on the exporter's schedule. When a login wall is hit *while* this is set, the worker raises one CRITICAL per 24h to `ADMIN_CHAT_ID` on the assumption the jar went stale.
 
+- `COOKIES_USER_AGENT` — optional; sent **only alongside the jar**, as the `User-Agent` header on cookie-bearing yt-dlp calls and on the direct fetch of a carousel still. Copy the exact UA of the browser that exported `COOKIES_FILE`, so the session is not replayed under a client it was never created in. Unset leaves yt-dlp's built-in default (Windows Chrome), i.e. the pre-2026-09-15 behaviour — which already matches a Windows-Chrome exporter, so it is worth setting only for any other browser.
+  <!-- src: embedthat e51e2fb | 2026-09-17 -->
+
 ## Architecture
 
 ### Two processes
@@ -145,6 +148,20 @@ Redis is simultaneously the cache, the dramatiq broker, and the lock store.
    never a domain allowlist — and costs one extra yt-dlp probe per uncached link.
 5. Signals in `bot/events/signals.py` trigger cross-cutting handlers (logging in
    `log.py`, usage counters in `stats.py`).
+
+**A host denylist now sits in front of step 3.** `embed_social` still reacts to
+any message containing a URL, but `_NOT_MEDIA_HOST_RE` in `bot/handlers.py` drops
+hosts that can never carry media (github, wikipedia, t.me, google, stackoverflow,
+pypi, npm …) before a job is queued — an ordinary pasted repo link in a group
+chat used to cost a full yt-dlp attempt, and the Instagram ones among them spent
+the burner's session on a fetch that could not have returned a video. It is a
+**denylist, not an allowlist**, deliberately: `/start` promises "and more" and
+yt-dlp supports thousands of sites, so an allowlist that forgets one fails
+silently, while a junk host slipping through costs exactly one wasted attempt.
+Add to it only for hosts that can never carry media — never for a platform that
+merely fails often.
+<!-- conflicts-with: "falls into the `embed_social` catch-all, which matches any `https?://` URL that is not YouTube" -->
+<!-- src: embedthat 256f935 | 2026-09-17 -->
 
 ### Admin-only surfaces (`ADMIN_CHAT_ID`)
 
