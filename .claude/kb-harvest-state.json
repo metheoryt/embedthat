@@ -1,17 +1,9 @@
 {
   "last_refresh": {
-    "commit": "ff655db",
-    "date": "2026-09-17",
-    "sessions_processed": [
-      "3ac18a6d-f70e-487e-94ec-e186e38e9d93",
-      "4c6388cc-b074-4f87-946a-1856f6adf415",
-      "6e9babc7-e426-4e4d-976b-1fda26002134"
-    ],
-    "tiers_touched": [
-      "project",
-      "claude-md",
-      "docs"
-    ]
+    "commit": "9d98286",
+    "date": "2026-09-23",
+    "tiers_touched": [],
+    "sessions_processed": []
   },
   "sessions": {
     "0a6e53cf-dcc4-4e58-b9c8-456ef89bd1af": {
