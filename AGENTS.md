@@ -160,7 +160,6 @@ yt-dlp supports thousands of sites, so an allowlist that forgets one fails
 silently, while a junk host slipping through costs exactly one wasted attempt.
 Add to it only for hosts that can never carry media — never for a platform that
 merely fails often.
-<!-- conflicts-with: "falls into the `embed_social` catch-all, which matches any `https?://` URL that is not YouTube" -->
 <!-- src: embedthat 256f935 | 2026-09-17 -->
 
 ### Admin-only surfaces (`ADMIN_CHAT_ID`)
