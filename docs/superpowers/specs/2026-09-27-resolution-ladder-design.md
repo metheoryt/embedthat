@@ -1,7 +1,8 @@
 # Resolution ladder: 1080 -> 720 -> 480 -> split
 
 **Date:** 2026-09-27
-**Status:** design, approved in chat 2026-09-27
+**Status:** design, approved in chat 2026-09-27; amended after review (strict
+per-rung selectors, `veryfast`, waiter TTL)
 
 ## Goal
 
@@ -80,7 +81,23 @@ One small module holds what both paths use, so the rule lives in one place:
 
 ## Social path (`bot/util/social/download.py`, `bot/worker/pipeline.py`)
 
-Two kinds of download, estimated differently:
+**Rung = strict selector.** Today's selector ends in `/best[ext=mp4]/best`, a
+fallback with no resolution filter and no merge. At 480 almost everything
+matches the first alternative, so it rarely fires; at 1080 it would catch every
+source that tops out lower. The VK video from 2026-09-26 is exactly that
+(probed 2026-09-27: its best stream is 1280x720): the 1080 selector would skip
+both `>=1080` alternatives and take a pre-muxed file with no re-encode -- no
+yuv420p, no main profile, no bitrate ceiling. So each rung gets a strict
+selector with no loose tail:
+
+- rung R (1080, 720): `worstvideo[ext=mp4][height>=R][width>=R]+bestaudio[ext=m4a]/worst[ext=mp4][height>=R][width>=R]`
+- rung 480: the same, followed by today's loose tail `/best[ext=mp4]/best`, so a
+  source below 480 still downloads as it does today.
+
+"The selector matches nothing" means "try the next rung". Selection is re-applied
+to the probe pass's info for each rung without re-extracting (the plan pins the
+exact yt-dlp call); the selected format tells us both whether the rung exists and
+which kind of download it is:
 
 - **Merged** (separate video + audio): the yt-dlp merger always re-encodes, so
   the source size says nothing about the output. The encode gets a per-rung
@@ -93,32 +110,47 @@ Two kinds of download, estimated differently:
   | 480  | 1.5 Mbit/s| 3M        | ~2.7 h             |
 
   Audio is pinned to `-b:a 128k` so it enters the estimate as a constant.
-  Estimate = duration x (maxrate + 128 kbit/s). CRF stays at the x264 default; the
-  ceiling only bounds the peaks, so short simple clips stay small.
+  Estimate = duration x (maxrate + 128 kbit/s). CRF stays at the x264 default;
+  the ceiling only bounds the peaks, so short simple clips stay small.
 - **Single file** (one format with audio, no merge, no re-encode): estimate =
-  the selected format's `filesize`, else `filesize_approx`. yt-dlp's format
-  selection is re-applied to the probe pass's info for each rung, without
-  re-extracting (the plan pins the exact yt-dlp call). Unknown size = no
-  estimate: the rung is allowed and the post-download check decides.
+  the selected format's `filesize`, else `filesize_approx`. Unknown size = no
+  estimate: the rung is allowed and the post-download check decides (a miss is
+  split, as today).
 
-**Time budget (merged only).** Measured 2026-09-27 on latitude, in the worker
-image, x264 main/yuv420p on a synthetic 30 fps source: 1080p ~48 fps, 720p ~100,
-480p ~200. Real footage is slower, call it half. A rung is allowed only if the
-duration is within its threshold: **1080 up to 10 min, 720 up to 30 min, 480
-beyond**. Worst cases at half speed: 10 min at 1080 ~12 min of encoding, 30 min
-at 720 ~18 min, 90 min at 480 ~27 min.
+**Encoder speed.** The merger gets `-preset veryfast`. Measured 2026-09-27 on
+latitude, in the worker image, on a real 60 s 720p VK clip, with the host busy
+after a reboot (load ~11 on 8 threads -- a realistic day for a box that also
+runs immich): `medium` 40 s (~37 fps), `veryfast` 21 s (~72 fps), and the
+`veryfast` file was *smaller* (9.3 vs 10.1 MB) under the same 3 Mbit/s ceiling.
+Synthetic `testsrc2` read 2.7x faster than real footage and is not used for
+sizing. Scaled by pixel count from the real clip, `veryfast` gives roughly:
+1080p ~32 fps, 720p ~72, 480p ~140.
+
+**Time budget (merged only).** A rung is allowed only if the duration is within
+its threshold: **1080 up to 10 min, 720 up to 30 min, 480 beyond**. Worst cases
+at 30 fps source: 10 min at 1080 ~9 min of encoding, 30 min at 720 ~13 min,
+90 min at 480 ~19 min. The worker runs 4 threads (`--processes 1 --threads 4`),
+so parallel jobs share the encoder's CPU and these stretch; the margin to the
+actor limit below is for that, and for the download and the upload.
 
 - `process_social_link`'s `time_limit` goes from 25 to **45 min**, like
   `process_youtube_link`. Known limit: a 3-hour VK video at 480 still overruns;
   that fails as it would today.
-- **Carousels:** one yt-dlp call downloads all positions with one set of options,
-  so the whole batch gets one rung -- the lowest any item needs. Carousel items
-  are short, so in practice that is 1080.
-- **Short side in yt-dlp:** the selector's `[height>=R]` becomes
-  `[height>=R][width>=R]` (short side >= R). Whether a format with missing width
-  should pass (`>=?`) is checked against a real Instagram and VK probe in the
-  plan, not assumed. The merger's `scale=-2:'min(R,ih)'` becomes the short-side
-  expression, verified with one ffmpeg run on a portrait clip.
+- **Waiters:** `_SOCIAL_WAITERS_TTL` (90 min) goes to **3 h**, like
+  `_YOUTUBE_WAITERS_TTL`. With 3 attempts x 45 min plus backoff the retry budget
+  is ~2.5 h; at 90 min a job that succeeded on its last retry would deliver to an
+  expired waiter list and the user would get silence.
+- **Upload time is not measured** for files near 2 GB (the rehearsal's largest
+  upload was far smaller). The biggest social outputs the thresholds allow are
+  ~470 MB at 1080, ~700 MB at 720, ~1.1 GB for a 90-minute 480 -- the first
+  production runs of each are watched in the worker log.
+- **Carousels:** one yt-dlp call downloads all positions with one set of
+  options, so the whole batch gets one rung -- the lowest any item needs.
+  Carousel items are short, so in practice that is 1080 or the source's own best.
+- **Short side in yt-dlp:** `[height>=R][width>=R]` above. Whether a format with
+  missing width should pass (`>=?`) is checked against a real Instagram and VK
+  probe in the plan, not assumed. The merger's `scale=-2:'min(R,ih)'` becomes the
+  short-side expression, verified with one ffmpeg run on a portrait clip.
 - `_split_oversized` stays as the fallback after download.
 
 ## Cache
@@ -138,8 +170,9 @@ with the local `telegram-bot-api` and the debug bot:
 
 1. A portrait Instagram reel arrives at its native short side (1080 wide), not
    270x480 or 608x1080.
-2. The 939-second VK video from 2026-09-26 arrives as one file at 720 (over the
-   10-minute 1080 threshold), within the time limit.
+2. The 939-second VK video from 2026-09-26 (source tops out at 720) arrives as
+   one merged, re-encoded file at 1280x720 -- not a pre-muxed file picked by the
+   loose fallback -- within the time limit.
 3. A long YouTube video whose 1080 stream does not fit in 2000 MB arrives as one
    file at 720; the worker log shows 1080 skipped **without** a download.
 4. A short YouTube video arrives at 1080, copied (no `libx264` in the log).
