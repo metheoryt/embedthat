@@ -53,6 +53,14 @@ to be split and nothing needs to be re-encoded to fit.
     the worker today; VAAPI on the iGPU is the ready next step.
 
   </details>
+- **Next, after the production switch (agreed 2026-09-26): a resolution ladder
+  up to 1080p.** Today `max_video_resolution=480` caps both the YouTube and the
+  social path. With 2000 MB a 1080p file (~5 Mbit/s) fits up to ~50 min, 720p
+  ~1.5 h, 480p ~4 h. Raising the setting alone is wrong: a long 1080p video would
+  then be split instead of dropped to 720/480, and the rule stays "split only if
+  480p does not fit". So: try 1080, then 720, then 480, and only then split --
+  measured by the short side (the deferred note above), on both paths. Its own
+  spec; it supersedes the 720p ceiling in the deferred parameters.
 - The splitting path stays in the code as a fallback. It is not removed.
 - No change to the YouTube stream-selection logic.
 
