@@ -314,6 +314,19 @@ There is no test suite (`.claude/memory/project.md`). The checks are:
   cloud again 19 min after the first logOut and delivered a link.
 - The server's startup line prints its argv; no API id or hash in it.
 
+## Production switch (2026-09-26)
+
+- 0.4.23 shipped the code with `BOT_API_URL` unset; the server and the prune
+  started idle, bot/worker recreated with the read-only mount.
+- 23:17: bot/worker stopped, cloud `logOut: True`, `BOT_API_URL` appended, up
+  again; about 20 s without the bot. No flush (the rehearsal showed ids survive).
+- Verified: `/stats`, a short link. A long link came back as the old cached
+  **parts** -- ids surviving also means split videos keep being served split. So
+  0.4.24 keys the video caches per API server (`ytl:`/`dl2l:` locally, `yt:`/`dl2:`
+  untouched for a rollback; `Settings.video_cache_tag`); audio keys stay shared.
+  After it the same VK link re-downloaded and arrived as one file. No retries,
+  no CRITICAL in the worker log.
+
 ## Open questions
 
 - Which image -- resolved 2026-09-26: `aiogram/telegram-bot-api`, pinned to the

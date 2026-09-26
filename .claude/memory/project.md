@@ -275,6 +275,15 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
 
 ## Repo & deploy conventions
 
+- **Prod talks to our own `telegram-bot-api` (local mode) since 2026-09-26.**
+  `BOT_API_URL` in the prod `.env` is the single switch (`bot/util/tg.py::make_bot`
+  is the only place a `Bot` is built; the 2000/50 MB limit and the `yt`/`dl2`
+  cache tag derive from it). The server holds the prod token, is pinned by
+  digest and excluded from Tugtainer; the worker mounts its volume read-only.
+  Rollback: stop bot/worker, `logOut` against the local server (URL still set),
+  delete `BOT_API_URL`, up -- the cloud refuses the bot for 10 min after any
+  logOut. Every listing of that volume or its logs must mask the token (it is
+  the per-bot directory name). Prod compose is `-f compose.prod.yml`.
 - Feature work commits both artifacts to git before any code: a design spec in
   `docs/superpowers/specs/YYYY-MM-DD-*.md`, then a task-by-task implementation
   plan in `docs/superpowers/plans/YYYY-MM-DD-*.md`.
