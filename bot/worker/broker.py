@@ -13,7 +13,8 @@ from bot.config import settings
 # `retry` only take effect on a client we construct ourselves. Without them a
 # pooled connection that outlived a redis restart raises `Broken pipe` on the
 # next enqueue (the default is zero retries) and the job is lost -- one such
-# message was dropped when the host rebooted on 2026-09-26.
+# message was dropped on 2026-09-26, when `embedthat-redis-1` was recreated
+# under a bot container that kept running.
 broker = RedisBroker(
     client=redis.Redis.from_url(
         str(settings.redis_dsn),

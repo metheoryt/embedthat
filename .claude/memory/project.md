@@ -177,6 +177,26 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   and they get silence, never an error.
   <!-- src: embedthat c8ad101 | 2026-09-17 -->
 
+- **`RedisBroker(url=...)` silently discards every connection option.** dramatiq
+  turns the url into a bare `ConnectionPool.from_url(url)` and passes it to
+  `redis.Redis(**parameters)`; redis-py ignores `health_check_interval`, `retry`
+  and friends the moment a pool is supplied, so adding them beside `url=` is a
+  no-op that reads like a fix. The default pooled connection also has
+  **zero retries** (`conn.retry.get_retries() == 0`, redis 8.0.1), which is why
+  a connection that outlived a redis restart raises `Broken pipe` instead of
+  reconnecting. They only bite on the **producer**: dramatiq's consumer rebuilds
+  itself on `ConnectionClosed`, so the worker recovers on its own and only the
+  bot loses the message. Build the client yourself and pass `client=`
+  (`url` defaults to `None`, and `client` wins at `brokers/redis.py:114`).
+  Measured against a real container restarted under a live client, 2026-09-26.
+- **Registering a waiter before enqueueing wedges the link when the enqueue
+  fails.** `register_waiter` returning `is_first` is the only thing that stops a
+  second job, so a list left behind with no job in flight makes every later send
+  of that link a silent no-op for the full 90 min TTL -- no error, no reply, and
+  a resend looks identical to the bot doing nothing. Both call sites now clear
+  the list when `.send()` raises. The recovery for a wedged link is
+  `redis-cli DEL <cache_key>:waiters`.
+
 ## Behavior & UX decisions
 
 - No "⏳ Processing…" ack message: results simply arrive when ready. The
