@@ -20,9 +20,6 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   `@dramatiq.actor` call site, and the `reportPossiblyUnbound` block in
   `bot/worker/pipeline.py` where pyright can't see that the post-retry-loop
   `if exc: raise` guard always fires first.
-- `faster_whisper`, `ffmpeg`, `pydub` and `pytubefix` publish no stub package on
-  PyPI, so their `reportMissingTypeStubs` / `reportUnknown*` noise can't be fixed
-  by `uv add` — only boundary annotations at the call sites help.
 - Never put `reportAny` / `reportExplicitAny` in `[tool.pyright]` — they are
   basedpyright-only keys and standard pyright prints "Config contains
   unrecognized setting" on every run.
@@ -65,7 +62,6 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   `translate.py` is a **ceiling, not debt** — no `uv add` moves it, and the only
   lever left is boundary annotations at the call sites. The Dockerfile installs
   with `--no-dev`, so a stub package never reaches prod.
-  <!-- conflicts-with: "`faster_whisper`, `ffmpeg`, `pydub` and `pytubefix` publish no stub package on PyPI" -->
   <!-- src: embedthat cec9e3a | 2026-09-12 -->
 - **Gortex reports live code as dead here — do not act on it.** The graph cannot
   see aiogram `@router.message` / `@router.callback_query` handlers, the
@@ -249,9 +245,6 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   `TemporaryDirectory`). The `except* Exception as eg: … raise eg.exceptions[0]`
   unwrap is load-bearing: dramatiq classifies expected errors from `throws=` by
   `isinstance`, so a bare `ExceptionGroup` would reclassify them as crashes.
-- `bot/util/aiohttp.py` is dead — zero importers, and its module-level
-  `ClientSession()` would raise on import outside a running loop. Cleanup
-  candidate.
 - `bot/util/stats.py` formats dates with the glibc `%-d` extension, so
   `build_stats_report()` raises on a Windows-hosted Python run even though it
   works in the Linux container — verify helpers like `_queue_stats()` directly
@@ -269,10 +262,6 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   argument. `bot/events/handlers/log.py` interpolates every field but `origin`
   that way; keep it that way when adding fields.
   <!-- src: embedthat 710e8a5 | 2026-09-12 -->
-- `bot/util/aiohttp.py` was **deleted** — the cleanup happened; there is no such
-  module to remove any more.
-  <!-- conflicts-with: "`bot/util/aiohttp.py` is dead — zero importers, and its module-level `ClientSession()` would raise on import outside a running loop. Cleanup candidate." -->
-  <!-- src: embedthat 1c8ce78 | 2026-09-12 -->
 
 - **Every media group of a carousel replies to the link and carries the caption.**
   A >10-item post is more than one message; captioning and replying only from the
@@ -282,17 +271,10 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   a caption on each -- verified in the dump chat with 13 items (2026-09-16), both
   groups returned `reply_to` = anchor and the full caption. Accepted cost: the
   warning repeats on every group.
-  <!-- conflicts-with: "Only the first group replies; the rest would each quote the same message and clutter the thread." -->
   <!-- src: embedthat 5053c28 | 2026-09-16 -->
 
 ## Repo & deploy conventions
 
-- **`AGENTS.md` is a hand-synced twin of `CLAUDE.md`** — a real file, not a
-  symlink, byte-identical except the header line (it is the Codex-facing
-  counterpart). Mirror every `CLAUDE.md` edit into it in the same commit — resync
-  it mechanically rather than by hand-editing twice:
-  `{ head -3 AGENTS.md; tail -n +4 CLAUDE.md; } > .agents.new && mv .agents.new AGENTS.md`,
-  then verify with `diff <(tail -n +4 AGENTS.md) <(tail -n +4 CLAUDE.md)`.
 - Feature work commits both artifacts to git before any code: a design spec in
   `docs/superpowers/specs/YYYY-MM-DD-*.md`, then a task-by-task implementation
   plan in `docs/superpowers/plans/YYYY-MM-DD-*.md`.
@@ -322,7 +304,6 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   guidance. Edit `AGENTS.md` directly and leave `CLAUDE.md` alone; nothing needs
   mirroring in either direction. Any bullet or doc here that says "see
   `CLAUDE.md` → <section>" means `AGENTS.md` → that section.
-  <!-- conflicts-with: "`{ head -3 AGENTS.md; tail -n +4 CLAUDE.md; } > .agents.new && mv .agents.new AGENTS.md`, then verify with `diff <(tail -n +4 AGENTS.md) <(tail -n +4 CLAUDE.md)`" -->
   <!-- src: embedthat 710e8a5 | 2026-09-12 -->
 - **`gh run list --limit 1` does not mean "the build".** This repo also runs a
   Dependency Graph workflow, which finishes in seconds, so a bare
