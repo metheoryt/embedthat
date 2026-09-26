@@ -16,6 +16,10 @@ services:
         volumes:
             - .:/app
             - bot_venv:/app/.venv
+            # Local mode hands out file paths on the server's disk, and
+            # download_file reads them directly -- so the worker (the only
+            # downloader: install_cookies) must see them at the same path.
+            - bot_api_data:/var/lib/telegram-bot-api:ro
         command: dramatiq bot.worker.actors --processes 1 --threads 4
         restart: unless-stopped
     redis:
@@ -27,7 +31,20 @@ services:
         environment:
             REDIS_ARGS: "--save 60 1"
         restart: unless-stopped
+    telegram-bot-api:
+        # Our own Bot API server in local mode (2000 MB uploads). No host port on
+        # purpose: it has no auth of its own, anything that reaches it can act as
+        # the bot. bot/worker reach it as http://telegram-bot-api:8081.
+        image: aiogram/telegram-bot-api:latest@sha256:c48c15017c2dfbe02c2d0909b9786846969fcb1f4b3e6f021b9dca9dd57ec45a
+        env_file:
+            - .env
+        environment:
+            TELEGRAM_LOCAL: 1
+        volumes:
+            - bot_api_data:/var/lib/telegram-bot-api
+        restart: unless-stopped
 
 volumes:
     redis_data:
     bot_venv:
+    bot_api_data:
