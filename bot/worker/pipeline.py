@@ -18,7 +18,6 @@ from bot.util.social.schema import MediaItem, SocialVideoData
 from bot.util.youtube.exc import YouTubeError
 from bot.util.youtube.schema import YouTubeVideoData
 from bot.util.youtube.video import (
-    MAX_FILE_SIZE_BYTES,
     check_download_adaptive,
     get_resolution,
     split_video,
@@ -107,14 +106,14 @@ def _split_oversized(media: MediaFile, output_dir: Path) -> list[MediaFile]:
     part_dir.mkdir(parents=True, exist_ok=True)
 
     file_size = media.file_path.stat().st_size
-    n_parts = math.ceil(file_size / MAX_FILE_SIZE_BYTES)
+    n_parts = math.ceil(file_size / settings.max_upload_size_bytes)
     file_paths = split_video(
         duration_seconds=media.duration,
         input_path=media.file_path,
         output_dir=part_dir,
         n_parts=n_parts,
     )
-    while any(p.stat().st_size > MAX_FILE_SIZE_BYTES for p in file_paths):
+    while any(p.stat().st_size > settings.max_upload_size_bytes for p in file_paths):
         n_parts += 1
         if n_parts > 10:
             raise SocialDownloadError("Video too large, cannot split into <= 10 parts")
@@ -229,7 +228,7 @@ async def _handle_social_video(bot: Bot, video: SocialVideoData) -> SocialVideoD
 
         sendable: list[MediaFile] = []
         for media in result.files:
-            if media.kind == "photo" or media.file_path.stat().st_size <= MAX_FILE_SIZE_BYTES:
+            if media.kind == "photo" or media.file_path.stat().st_size <= settings.max_upload_size_bytes:
                 sendable.append(media)
                 continue
             sendable.extend(_split_oversized(media, tmp_path))

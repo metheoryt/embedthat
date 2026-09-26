@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Any, cast
 
 from bot.config import settings
-from bot.util.youtube.video import MAX_FILE_SIZE_BYTES
 from bot.util.ytdlp import extract_info
 
 from .exc import AudioDownloadError
@@ -139,9 +138,12 @@ def download_track(track: AudioTrackData, output_dir: Path) -> Path:
     track.duration = track.duration or (int(info["duration"]) if info.get("duration") else None)
 
     file_path = Path(info["requested_downloads"][0]["filepath"])
-    if file_path.stat().st_size > MAX_FILE_SIZE_BYTES:
+    limit = settings.max_upload_size_bytes
+    if file_path.stat().st_size > limit:
         file_path.unlink(missing_ok=True)
-        raise AudioDownloadError(f"{track.title or track.webpage_url} is too large to send (over 50MB)")
+        raise AudioDownloadError(
+            f"{track.title or track.webpage_url} is too large to send (over {limit // 1_000_000} MB)"
+        )
 
     log.info("downloaded track %s -> %s", track.webpage_url, file_path)
     return file_path

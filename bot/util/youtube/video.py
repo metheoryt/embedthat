@@ -13,9 +13,6 @@ from .exc import YouTubeError, translates_youtube_errors
 from .schema import YouTubeVideoData
 from .translate import maybe_translate_audio
 
-MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50MB
-
-
 log = logging.getLogger(__name__)
 
 
@@ -118,7 +115,7 @@ def pick_stream(
             stream: Stream
             total_size = audio_size + stream.filesize
 
-            max_size = MAX_FILE_SIZE_BYTES * 0.98
+            max_size = settings.max_upload_size_bytes * 0.98
 
             log.info(
                 "%dMb total size (%dMb/part) for %d parts for %s",
@@ -245,7 +242,7 @@ def check_download_adaptive(
             log.info('%s size: %dMb', file.name, file.stat().st_size // 1024 // 1024)
 
         # the second size check is after split
-        too_big_files = [file for file in video_paths if file.stat().st_size > MAX_FILE_SIZE_BYTES]
+        too_big_files = [file for file in video_paths if file.stat().st_size > settings.max_upload_size_bytes]
         if too_big_files:
             if n_parts == 10:
                 raise YouTubeError("The video is too big and already split for 10 parts.")
