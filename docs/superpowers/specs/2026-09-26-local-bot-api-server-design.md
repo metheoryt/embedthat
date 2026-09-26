@@ -1,7 +1,8 @@
 # Local Bot API server
 
 **Date:** 2026-09-26
-**Status:** design, approved in chat (approach B)
+**Status:** design, approved in chat (approach B); amended while planning
+(`docs/superpowers/plans/2026-09-26-local-bot-api-server.md`)
 
 ## Goal
 
@@ -80,7 +81,7 @@ telegram-bot-api:
     extends:
         file: ../compose.base.yml
         service: base
-    image: aiogram/telegram-bot-api:latest
+    image: aiogram/telegram-bot-api:latest@sha256:<digest>   # pinned; see Open questions
     env_file: [ .env ]          # TELEGRAM_API_ID, TELEGRAM_API_HASH
     environment:
         TELEGRAM_LOCAL: 1
@@ -105,6 +106,11 @@ network.
 **Two repositories change.** The production compose lives on latitude at
 `/home/me/my/vps/homeserver/embedthat/compose.prod.yml`, i.e. in the `vps`
 repo; this repo only carries the dev `compose.yml`. Each gets its own commit.
+The dev `compose.yml` cannot use `extends: ../compose.base.yml` (that file exists
+only on latitude), so there the service carries its own `restart:` instead.
+
+The server is pinned by digest and **not** auto-updated by Tugtainer: it holds
+the production token, so an image change is a deliberate edit of the digest.
 
 ## Code changes
 
@@ -123,6 +129,16 @@ there, which fails rather than degrades, but fails at an arbitrary later moment.
    `**kwargs` so that stays a caller's concern.
    `TelegramAlertHandler` takes a token, not a `Bot`, so it calls the factory
    too -- its alerts are the one path that must keep working during migration.
+
+   **Upload timeout (added 2026-09-26, while planning).** In local mode the
+   server answers `sendVideo` only after pushing the file on to Telegram, which
+   for a large file far exceeds aiogram's 60 s default. A timeout raises
+   `TelegramNetworkError`, and every upload helper retries that three times --
+   the same file posted three times to the dump chat. So the factory takes
+   `uploads=True` from the worker actors and then uses a 30-minute session
+   timeout, local mode only. Not in `main.py`: aiogram polling adds
+   `session.timeout` to every `getUpdates` wait, so a long timeout there would
+   hide a hung poll.
 2. **New setting.** `bot_api_url: str | None = None` in `bot/config.py::Settings`
    (`AliasChoices("bot_api_url")`). Empty means the cloud server, so local
    development and anyone else's checkout are unchanged by default.
@@ -132,17 +148,32 @@ there, which fails rather than degrades, but fails at an arbitrary later moment.
    `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` and `BOT_API_URL`; the same file is
    read by `bot`, `worker` and the new service, so the two credentials reach the
    server without being repeated anywhere.
-3. **Size limit becomes a setting.** `MAX_FILE_SIZE_BYTES` in
-   `bot/util/youtube/video.py` is a module constant used by both the YouTube and
-   the social path. It becomes `settings.max_upload_size_bytes`, defaulting to
-   the current 50 MB, set to 2000 MB where the local server is configured. The
-   splitting code is untouched; it simply stops triggering.
-4. **Stale `file_id` handling in the audio path.**
-   `bot/util/audio/pager.py::redeliver_page` catches `TelegramBadRequest` only
-   around `delete_message`, not around `audio.send_to_chat`. The social path
-   already self-heals (`bot/handlers.py::_process_social_url` clears the cache
-   entry and re-downloads on `TelegramBadRequest`); the audio path must do the
-   same, or every cached audio page raises after the migration.
+3. **Size limit follows the server.** `MAX_FILE_SIZE_BYTES` in
+   `bot/util/youtube/video.py` is a module constant with **three** consumers: the
+   YouTube path, the social path (`bot/worker/pipeline.py`), and
+   `bot/util/audio/download.py`, which also hardcodes "over 50MB" in its error
+   message. It becomes the property `settings.max_upload_size_bytes`, **derived
+   from `bot_api_url`** -- 2000 MB when it is set (truthy, so `BOT_API_URL=` means
+   cloud), 50 MB otherwise. Deliberately not a second env var: a rollback that
+   unset only the URL would keep the 2000 MB limit and send every large video to
+   the cloud, where it fails. The splitting code is untouched; it simply stops
+   triggering.
+4. **Stale `file_id` handling.** Already self-healing: the YouTube video path
+   and the social video path (both clear the key and re-download on
+   `TelegramBadRequest`). Not yet:
+   - `bot/util/audio/pager.py::redeliver_page` catches `TelegramBadRequest` only
+     around `delete_message`, not around `audio.send_to_chat`. It has three
+     callers: the `apg:` pager button, the audio cache hit in
+     `_process_social_url`, and the worker's post-download delivery. On a
+     rejected send it clears the page's ids and raises a typed error; the two
+     handlers then enqueue a fresh download, the worker tells its waiters to
+     resend.
+   - The clearing must include the per-track `au:<extractor>:<id>` keys, not only
+     `da:`: `actors._resolve_cached_tracks` refills track ids from them, so
+     clearing `da:` alone brings the dead ids straight back.
+   - The 🎵 `aud:` button sends `video.audio_file_id` unguarded; a dead id there
+     reaches `error_handler` and fires a CRITICAL alert on every tap. It clears
+     `audio_file_id` and falls through to extraction.
 
 ## Downloads in local mode
 
@@ -176,10 +207,17 @@ than trust it. The Bot API documentation does not state either way;
 [tdlib/telegram-bot-api#359](https://github.com/tdlib/telegram-bot-api/issues/359)
 reports cloud-issued ids failing against a local server.
 
-With change 4 above, both cached paths degrade into a re-download instead of an
-error, so no flush is strictly required. Flushing the `dl2:` keys is still the
-cheaper option if the rehearsal shows ids are dead -- it turns a slow first
-delivery per link into a single scripted `SCAN`+`DEL`. Decide after measuring.
+With change 4 above, every cached path degrades into a re-download instead of an
+error, so no flush is strictly required. A flush is still the cheaper option if
+the rehearsal shows ids are dead -- it turns a slow first delivery per link into
+a single scripted `SCAN`+`DEL`. It must cover every file-id-bearing prefix --
+`yt:`, `dl2:`, `da:` and `au:` -- and run while `bot` and `worker` are stopped
+(between runbook steps 3 and 4), so it cannot delete a live `:lock` or waiter
+key. Decide after measuring.
+
+The rehearsal can only answer this if cloud-issued ids exist to test: seed the
+dev cache (one social video, one YouTube 🎵, one audio page) **before** the
+debug bot is logged out.
 
 ## Disk
 
@@ -190,6 +228,16 @@ directory and does not reliably clean up after itself
 240 GB free, so this is a maintenance item, not a blocker, but it is unbounded
 growth and must be watched: after the rehearsal, measure what one video costs on
 disk and add a cleanup (a periodic prune of the volume) sized from that number.
+
+The prune is age-based (media older than 24 h) and **allowlists the media
+subdirectories** the rehearsal records: the same volume holds each bot's tdlib
+state (`td.binlog`, `db.sqlite*`), and deleting that logs the bot out. A
+`file_id` stays valid after its local copy is gone.
+
+It also bounds a side effect: in local mode an uploaded cookie jar lands on this
+volume and stays there -- the extra on-disk copy the `install_cookies` docstring
+was written to avoid. With the prune it lives at most a day; deleting it right
+after reading would need a read-write mount on the worker. Open for the user.
 
 ## Migration runbook
 
@@ -218,14 +266,17 @@ There is no test suite (`.claude/memory/project.md`). The checks are:
 - **pyright and ruff against a recorded baseline**, comparing finding sets, not
   totals.
 - **Rehearsal on the debug bot** as the real functional gate: one upload above
-  50 MB, one cached `file_id` from before the switch, one `TelegramAlertHandler`
-  alert (it is the path that must survive a broken migration).
+  50 MB, cached `file_id`s from before the switch on every cache path, one
+  `TelegramAlertHandler` alert (it is the path that must survive a broken
+  migration), one cookie-jar upload (the only local-mode download, crossing
+  containers through the read-only mount), and the `logOut` + rollback steps
+  themselves.
 - **Production**: a link that used to be split arrives as a single file.
 
 ## Open questions
 
-- Which image: `aiogram/telegram-bot-api` (prebuilt, tracks upstream) versus
-  building `tdlib/telegram-bot-api` ourselves. The prebuilt one is assumed here;
-  it is a third-party build of a first-party source, which is worth a look before
-  it holds the production token.
+- ~~Which image~~ -- decided 2026-09-26: `aiogram/telegram-bot-api`, **pinned by
+  digest**, after reading its Dockerfile and entrypoint (builds from
+  `tdlib/telegram-bot-api` source, honours `TELEGRAM_LOCAL`). The digest and the
+  review notes are filled in by plan Task 5.
 - Nothing outstanding on `getFile`; see "Downloads in local mode" above.
