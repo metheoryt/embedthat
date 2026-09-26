@@ -5,10 +5,10 @@ import queue
 import threading
 import traceback
 
-from aiogram import Bot
 from aiogram.types import LinkPreviewOptions
 
 from bot.config import settings
+from bot.util.tg import make_bot
 
 _MAX_MESSAGE_LEN = 4000  # keep under Telegram's 4096-char message cap with margin
 
@@ -70,7 +70,7 @@ class TelegramAlertHandler(logging.Handler):
                 pass
 
     async def _send(self, text: str) -> None:
-        bot = Bot(token=self._token)
+        bot = make_bot(self._token)
         try:
             await bot.send_message(
                 self._chat_id,

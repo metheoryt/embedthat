@@ -1,7 +1,6 @@
 import asyncio
 import logging
 
-from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from dotenv import load_dotenv
 
@@ -9,12 +8,13 @@ from bot.config import settings
 from bot.dispatcher import dp, router
 from bot.events import freeze_signals
 from bot.util.telegram_log_handler import install_admin_alert_handler
+from bot.util.tg import make_bot
 
 
 async def main() -> None:
     from bot import handlers  # noqa
 
-    the_bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode="HTML"))
+    the_bot = make_bot(default=DefaultBotProperties(parse_mode="HTML"))
     dp.include_router(router)
     me = await the_bot.get_me()
 

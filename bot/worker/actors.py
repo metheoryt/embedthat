@@ -24,6 +24,7 @@ from bot.util.cookies import install as install_cookie_jar
 from bot.util.redis_lock import HeartbeatLock
 from bot.util.social.exc import SocialDownloadError
 from bot.util.social.schema import SocialVideoData
+from bot.util.tg import make_bot
 from bot.util.youtube.enum import TargetLang
 from bot.util.youtube.exc import YouTubeError
 from bot.util.youtube.schema import YouTubeVideoData
@@ -263,7 +264,7 @@ async def _process_youtube_link_async(bot: Bot, chat_id: int, link: str, target_
     on_retry_exhausted="report_actor_failure",
 )
 def process_youtube_link(chat_id: int, link: str, target_lang: str) -> None:
-    bot = Bot(token=settings.bot_token)
+    bot = make_bot(uploads=True)
     try:
         asyncio.run(_process_youtube_link_async(bot, chat_id, link, target_lang))
     finally:
@@ -338,7 +339,7 @@ async def _process_youtube_audio_async(bot: Bot, chat_id: int, video_id: str, re
     on_retry_exhausted="report_actor_failure",
 )
 def process_youtube_audio(chat_id: int, video_id: str, reply_to_message_id: int) -> None:
-    bot = Bot(token=settings.bot_token)
+    bot = make_bot(uploads=True)
     try:
         asyncio.run(_process_youtube_audio_async(bot, chat_id, video_id, reply_to_message_id))
     finally:
@@ -415,7 +416,7 @@ async def _process_social_link_async(bot: Bot, chat_id: int, url: str) -> None:
     on_retry_exhausted="report_actor_failure",
 )
 def process_social_link(chat_id: int, url: str) -> None:
-    bot = Bot(token=settings.bot_token)
+    bot = make_bot(uploads=True)
     try:
         asyncio.run(_process_social_link_async(bot, chat_id, url))
     finally:
@@ -462,7 +463,7 @@ async def _process_audio_page_async(bot: Bot, chat_id: int, hash16: str, page: i
     on_retry_exhausted="report_actor_failure",
 )
 def process_audio_page(chat_id: int, hash16: str, page: int) -> None:
-    bot = Bot(token=settings.bot_token)
+    bot = make_bot(uploads=True)
     try:
         asyncio.run(_process_audio_page_async(bot, chat_id, hash16, page))
     finally:
@@ -533,7 +534,7 @@ def install_cookies(chat_id: int, file_id: str, message_id: int) -> None:
     silent retry of a *successful* install would restore a superseded jar over
     the live one.
     """
-    bot = Bot(token=settings.bot_token)
+    bot = make_bot(uploads=True)
     try:
         asyncio.run(_install_cookies_async(bot, chat_id, file_id, message_id))
     finally:
