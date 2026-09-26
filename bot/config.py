@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     # default, the pre-2026-09-15 behaviour.
     cookies_user_agent: str | None = None
 
+    # Our own telegram-bot-api server in local mode, e.g. http://telegram-bot-api:8081.
+    # Unset or empty = Telegram's cloud server, exactly the pre-2026-09-26 behaviour.
+    bot_api_url: str | None = None
+
     # populated on setup
     bot_username: str | None = None
     tz: str | None = None
@@ -44,6 +48,16 @@ class Settings(BaseSettings):
     @property
     def timezone(self) -> ZoneInfo:
         return ZoneInfo(self.tz or "UTC")
+
+    @property
+    def max_upload_size_bytes(self) -> int:
+        # Derived from bot_api_url, never set on its own: a rollback that unsets
+        # only the URL must also drop the limit, or every large video is sent to
+        # the cloud and fails. Decimal MB on the local side on purpose -- it stays
+        # under the 2000 MB cap whichever unit Telegram means.
+        if self.bot_api_url:
+            return 2000 * 1000 * 1000
+        return 50 * 1024 * 1024
 
     def now(self) -> datetime:
         return datetime.now(self.timezone)
