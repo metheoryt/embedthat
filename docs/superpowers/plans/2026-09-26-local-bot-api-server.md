@@ -16,6 +16,8 @@
 - **Never read secret VALUES into context.** Key names only: `cut -d= -f1 <file>`. Move secrets with pipes that never print them. Never `cat`, `grep` without `-q`/redirection, or `docker compose config` a `.env`.
 - Never edit in the main checkout `/home/me/my/embedthat`. This worktree only. The `vps` repo gets its own workspace (Task 9).
 - Never `git stash` (the stack is shared across worktrees). Never `docker compose down -v` on the prod project (`name: embedthat` holds the redis volume).
+- **The bot token appears in the server's file paths** (local mode stores each bot's files under a directory named after its token, and `getFile` returns absolute paths through it). Pipe every listing of the volume and every `logs telegram-bot-api` through the mask below before it reaches the screen:
+  `MASK="sed -E 's#[0-9]{6,}:[A-Za-z0-9_-]{30,}#<token>#g; s#(api[-_]hash[= ]+)[0-9a-f]{16,}#\\1<hash>#Ig'"` -- used as `... | eval "$MASK"`, or simply paste the `sed` inline.
 - Reach the prod host as `ssh latitude.gg.ez` (FQDN, never bare `latitude`).
 - `BOT_API_URL` empty or unset = cloud server, 50 MB limit, behaviour identical to today. Set = local server, 2000 MB limit.
 - The server gets **no host port**. It is reachable only as `http://telegram-bot-api:8081` on the compose network.
@@ -497,7 +499,8 @@ Fetch `https://github.com/aiogram/telegram-bot-api` and read its `Dockerfile` an
 - it builds from `tdlib/telegram-bot-api` source (which ref/commit), not from a downloaded binary;
 - the entrypoint maps `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` and `TELEGRAM_LOCAL` to the binary's `--api-id`, `--api-hash`, `--local`;
 - the working directory is `/var/lib/telegram-bot-api` and the listen port is 8081;
-- nothing phones home or adds flags beyond those (e.g. no `--http-stat-port` exposed publicly).
+- nothing phones home or adds flags beyond those (e.g. no `--http-stat-port` exposed publicly);
+- whether the entrypoint echoes its argv (`set -x`, `echo` of the command line). If it prints `--api-hash=...`, every `logs telegram-bot-api` read must be masked (the MASK in Global Constraints covers `api-hash`), and say so in the spec.
 
 If any of these fails, stop and report to the user -- the fallback is building `tdlib/telegram-bot-api` ourselves, which is his call.
 
@@ -660,7 +663,7 @@ Expected: `logOut: True`. Note the time: the bot cannot log back into the cloud 
 
 ```bash
 docker compose -f compose.yml -f $O/local.yml up -d telegram-bot-api
-docker compose logs --tail 30 telegram-bot-api
+docker compose logs --tail 30 telegram-bot-api | sed -E 's#[0-9]{6,}:[A-Za-z0-9_-]{30,}#<token>#g; s#(api[-_]hash[= ]+)[0-9a-f]{16,}#\1<hash>#Ig'
 docker compose exec -T telegram-bot-api du -sb /var/lib/telegram-bot-api
 docker compose -f compose.yml -f $O/local.yml up -d bot worker
 docker compose logs --tail 30 bot worker
@@ -675,6 +678,8 @@ Ask the user to resend the three links from Step 4 and tap 🎵 again on the You
 ```bash
 docker compose logs --since 5m bot worker | grep -E "cache hit|rejected|invalid|cache miss|clearing"
 ```
+
+Also note the exact rejection text if one appears (the `(...)` in the `rejected` line): if it is distinctive, narrowing `redeliver_page`'s catch to it is a cheap follow-up, since today a deleted reply-to message would also count as dead ids.
 
 Expected: every link ends delivered, with either no rejection or a `rejected ... clearing` / `cached file ids invalid` line followed by a fresh download. **No CRITICAL in the admin chat.**
 
@@ -704,11 +709,17 @@ Expected: the message appears in the debug bot's admin chat.
 
 - [ ] **Step 10: Cookie-jar upload (the only local-mode download, across containers)**
 
-Ask the user to upload any `.txt` file (a harmless dummy is fine) as a document to the debug bot from the admin chat. Expected reply: either the install report or `❌ Not installed — <jar validation reason>`. Either proves the worker read the file off the server's volume. A reply mentioning a missing file / `FileNotFoundError` / `Install failed` means the ro mount or path is wrong -- stop and fix Task 6 before going on. Then record where the uploaded file sits on the volume:
+Ask the user to upload, from the admin chat, a dummy `dummy.txt` whose whole content is `not a cookie jar`. It fails validation on purpose, so it can never overwrite a real dev jar, and the expected reply `❌ Not installed — <validation reason>` proves the worker downloaded and read the file off the server's volume. If the reply is `❌ Install failed — ...` instead, read the worker traceback (masked) to see where it died: only a failure inside `get_file` / `download_file` (e.g. `FileNotFoundError` on a `/var/lib/telegram-bot-api/...` path) points at the Task 6 mount; a failure in the install itself is the dev `COOKIES_FILE`, unrelated to this work.
 
 ```bash
-docker compose exec -T telegram-bot-api find /var/lib/telegram-bot-api -maxdepth 3 -type d
-docker compose exec -T telegram-bot-api find /var/lib/telegram-bot-api -name '*.txt' -newermt '-10 minutes'
+docker compose logs --since 5m worker | sed -E 's#[0-9]{6,}:[A-Za-z0-9_-]{30,}#<token>#g; s#(api[-_]hash[= ]+)[0-9a-f]{16,}#\1<hash>#Ig' | grep -A15 -i 'cookie jar'
+```
+
+Then record the volume layout and where the upload landed. The masking is not optional: the per-bot directory name IS the token.
+
+```bash
+docker compose exec -T telegram-bot-api find /var/lib/telegram-bot-api -maxdepth 3 | sed -E 's#[0-9]{6,}:[A-Za-z0-9_-]{30,}#<token>#g; s#(api[-_]hash[= ]+)[0-9a-f]{16,}#\1<hash>#Ig'
+docker compose exec -T telegram-bot-api find /var/lib/telegram-bot-api -name '*.txt' -newermt '-10 minutes' | sed -E 's#[0-9]{6,}:[A-Za-z0-9_-]{30,}#<token>#g; s#(api[-_]hash[= ]+)[0-9a-f]{16,}#\1<hash>#Ig'
 ```
 
 Record the directory layout (it is what Task 8's prune allowlists) and whether the jar copy lingers.
@@ -767,13 +778,10 @@ The server keeps every uploaded file and does not clean up (tdlib/telegram-bot-a
     # Deletes uploaded/downloaded media older than a day. Allowlisted subdirs
     # only: the same volume holds each bot's td.binlog/db.sqlite, and deleting
     # those logs the bot out. A file_id stays valid after its local copy goes.
-    command: >
-      sh -c 'while :; do
-        find /var/lib/telegram-bot-api -type f -mmin +1440
-          \( -path "*/videos/*" -o -path "*/documents/*" -o -path "*/photos/*"
-             -o -path "*/music/*" -o -path "*/temp/*" -o -path "*/thumbnails/*" \)
-          -print -delete;
-        sleep 3600; done'
+    # One line on purpose: a folded YAML scalar keeps the line breaks of
+    # more-indented lines, which would split the find into separate commands.
+    # No -print: the paths contain the bot token and would land in the logs.
+    command: ["sh", "-c", "while :; do find /var/lib/telegram-bot-api -type f -mmin +1440 \\( -path '*/videos/*' -o -path '*/documents/*' -o -path '*/photos/*' -o -path '*/music/*' -o -path '*/temp/*' -o -path '*/thumbnails/*' \\) -delete; sleep 3600; done"]
     volumes:
       - bot_api_data:/var/lib/telegram-bot-api
 ```
@@ -782,7 +790,7 @@ Replace the `-path` list with exactly the media directories Task 7 recorded (add
 
 - [ ] **Step 2: Verify after deploy (Task 9 Step 6)**
 
-`ssh latitude.gg.ez 'cd ~/my/vps/homeserver/embedthat && docker compose logs --tail 20 telegram-bot-api-prune'` -- no errors; after a day, printed paths are media files only.
+`ssh latitude.gg.ez 'cd ~/my/vps/homeserver/embedthat && docker compose logs --tail 20 telegram-bot-api-prune'` -- empty (no errors). After a day, confirm it deleted media and nothing else by counts, never by listing paths: `docker compose exec -T telegram-bot-api sh -c 'find /var/lib/telegram-bot-api -type f -mmin +1500 | wc -l; find /var/lib/telegram-bot-api -name td.binlog | wc -l'` -> old media `0`, `td.binlog` still `>= 1`, and the bot still answers.
 
 (Committed as part of Task 9.)
 
@@ -855,9 +863,10 @@ Commit in the vps workspace (`embedthat: local telegram-bot-api server, idle unt
 ssh latitude.gg.ez 'cut -d= -f1 ~/my/vps/homeserver/embedthat/.env'
 ```
 
-If `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` are absent:
+If `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` are absent, first make sure the file ends in a newline, or the first appended key is glued onto the last value line (this prints `1` or `0`, never a value):
 
 ```bash
+ssh latitude.gg.ez 'f=~/my/vps/homeserver/embedthat/.env; [ "$(tail -c1 $f | wc -l)" = 1 ] || echo >> $f'
 grep -E '^TELEGRAM_API_(ID|HASH)=' /home/me/my/embedthat/.env \
   | ssh latitude.gg.ez 'cat >> ~/my/vps/homeserver/embedthat/.env'
 ssh latitude.gg.ez 'cut -d= -f1 ~/my/vps/homeserver/embedthat/.env'
@@ -868,7 +877,7 @@ Expected: both names now listed once. `BOT_API_URL` must NOT be there yet.
 - [ ] **Step 6: Start only the new services**
 
 ```bash
-ssh latitude.gg.ez 'cd ~/my/vps/homeserver/embedthat && docker compose config --quiet && docker compose up -d telegram-bot-api telegram-bot-api-prune && docker compose ps && docker compose logs --tail 30 telegram-bot-api'
+ssh latitude.gg.ez 'cd ~/my/vps/homeserver/embedthat && docker compose config --quiet && docker compose up -d telegram-bot-api telegram-bot-api-prune && docker compose ps && docker compose logs --tail 30 telegram-bot-api' | sed -E 's#[0-9]{6,}:[A-Za-z0-9_-]{30,}#<token>#g; s#(api[-_]hash[= ]+)[0-9a-f]{16,}#\1<hash>#Ig'
 ```
 
 Expected: server running and idle (no bot has used it). Bot and worker untouched, still on the cloud. In the Tugtainer UI (`http://latitude.gg.ez:9412` -> Containers) confirm `embedthat-telegram-bot-api-1` has check/update OFF.
@@ -904,7 +913,9 @@ Expected: `logOut: True`. Note the time.
 
 - [ ] **Step 3: Set the URL**
 
-`ssh latitude.gg.ez "echo 'BOT_API_URL=http://telegram-bot-api:8081' >> ~/my/vps/homeserver/embedthat/.env && cut -d= -f1 ~/my/vps/homeserver/embedthat/.env"`
+```bash
+ssh latitude.gg.ez 'f=~/my/vps/homeserver/embedthat/.env; [ "$(tail -c1 $f | wc -l)" = 1 ] || echo >> $f; echo BOT_API_URL=http://telegram-bot-api:8081 >> $f; cut -d= -f1 $f'
+```
 
 - [ ] **Step 4: Flush cached ids -- ONLY if the rehearsal showed they die**
 
@@ -922,7 +933,7 @@ Skip entirely if Task 7 showed the ids survive -- Task 4's heal covers straggler
 - [ ] **Step 5: Start on the local server**
 
 ```bash
-ssh latitude.gg.ez 'cd ~/my/vps/homeserver/embedthat && docker compose up -d bot worker && sleep 10 && docker compose logs --tail 30 bot worker telegram-bot-api'
+ssh latitude.gg.ez 'cd ~/my/vps/homeserver/embedthat && docker compose up -d bot worker && sleep 10 && docker compose logs --tail 30 bot worker telegram-bot-api' | sed -E 's#[0-9]{6,}:[A-Za-z0-9_-]{30,}#<token>#g; s#(api[-_]hash[= ]+)[0-9a-f]{16,}#\1<hash>#Ig'
 ```
 
 Expected: polling started, no `Unauthorized`.

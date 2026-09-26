@@ -232,7 +232,9 @@ disk and add a cleanup (a periodic prune of the volume) sized from that number.
 The prune is age-based (media older than 24 h) and **allowlists the media
 subdirectories** the rehearsal records: the same volume holds each bot's tdlib
 state (`td.binlog`, `db.sqlite*`), and deleting that logs the bot out. A
-`file_id` stays valid after its local copy is gone.
+`file_id` stays valid after its local copy is gone. The per-bot directory is
+named after the bot token, so the prune prints nothing and every listing of the
+volume or read of the server's logs is masked.
 
 It also bounds a side effect: in local mode an uploaded cookie jar lands on this
 volume and stays there -- the extra on-disk copy the `install_cookies` docstring
@@ -275,8 +277,9 @@ There is no test suite (`.claude/memory/project.md`). The checks are:
 
 ## Open questions
 
-- ~~Which image~~ -- decided 2026-09-26: `aiogram/telegram-bot-api`, **pinned by
-  digest**, after reading its Dockerfile and entrypoint (builds from
-  `tdlib/telegram-bot-api` source, honours `TELEGRAM_LOCAL`). The digest and the
-  review notes are filled in by plan Task 5.
+- Which image -- chosen 2026-09-26: `aiogram/telegram-bot-api`, **pinned by
+  digest**. **Not yet vetted:** reading its Dockerfile and entrypoint (does it
+  build from `tdlib/telegram-bot-api` source, honour `TELEGRAM_LOCAL`, echo the
+  API hash in its logs?) is plan Task 5, and the choice stands only if that
+  review passes. Task 5 replaces this bullet with the digest and its findings.
 - Nothing outstanding on `getFile`; see "Downloads in local mode" above.
