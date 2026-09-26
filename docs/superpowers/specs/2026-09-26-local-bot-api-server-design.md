@@ -239,7 +239,10 @@ volume or read of the server's logs is masked.
 It also bounds a side effect: in local mode an uploaded cookie jar lands on this
 volume and stays there -- the extra on-disk copy the `install_cookies` docstring
 was written to avoid. With the prune it lives at most a day; deleting it right
-after reading would need a read-write mount on the worker. Open for the user.
+after reading would need a read-write mount on the worker. Decided 2026-09-26:
+keep the prune, no immediate delete. The live jar already sits on the same host
+(`./cookies/cookies.txt`), so a day-old copy on the same disk adds nothing an
+attacker with disk access lacks, and a read-only mount stays read-only.
 
 ## Migration runbook
 
