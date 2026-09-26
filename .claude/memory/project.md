@@ -331,10 +331,13 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   the *previous* image and a "deployed" claim that was false. Watch by run ID,
   or filter on the workflow name.
   <!-- src: embedthat 710e8a5 | 2026-09-12 -->
-- **`embedthat-redis-1` is left disabled in Tugtainer on purpose.** Only the bot
-  and worker rows are enabled for auto-update; the datastore is not, because its
-  volume is the one the prod compose warns must never be `down -v`'d. An
-  apparently "missing" Tugtainer row for redis is the intended state.
+- **`embedthat-redis-1` auto-updates in Tugtainer as of 2026-09-26** -- the
+  labels `dev.quenary.tugtainer.auto_check/auto_update=true` are in
+  `compose.prod.yml` and the command was verified to survive an update on
+  Tugtainer 1.43. It had been off since 2026-07, when a Tugtainer recreate
+  dropped the container's `Cmd`, and the old note here said that was deliberate
+  and permanent. It is not: all three rows are enabled now. The volume warning
+  still stands on its own -- never `down -v` this project.
   <!-- src: embedthat 710e8a5 | 2026-09-12 -->
 
 - **`importlib.metadata.version("embedthat")` cannot verify the deployed

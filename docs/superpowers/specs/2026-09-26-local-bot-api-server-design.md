@@ -45,15 +45,22 @@ compose network:
 
 ```yaml
 telegram-bot-api:
+    extends:
+        file: ../compose.base.yml
+        service: base
     image: aiogram/telegram-bot-api:latest
+    env_file: [ .env ]          # TELEGRAM_API_ID, TELEGRAM_API_HASH
     environment:
-        TELEGRAM_API_ID: ${TELEGRAM_API_ID}
-        TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
         TELEGRAM_LOCAL: 1
     volumes:
         - bot_api_data:/var/lib/telegram-bot-api
-    restart: unless-stopped
 ```
+
+Every service in the production stack extends `../compose.base.yml`, so this one
+does too rather than inventing its own restart policy and logging. The project
+is pinned as `name: embedthat` and there are no explicit networks, so `bot` and
+`worker` reach it as `http://telegram-bot-api:8081` on the default project
+network.
 
 - **No host port.** The server exposes a token-addressed HTTP API with no
   authentication of its own; anything that can reach it can act as the bot.
@@ -87,6 +94,12 @@ there, which fails rather than degrades, but fails at an arbitrary later moment.
 2. **New setting.** `bot_api_url: str | None = None` in `bot/config.py::Settings`
    (`AliasChoices("bot_api_url")`). Empty means the cloud server, so local
    development and anyone else's checkout are unchanged by default.
+
+   The production `.env` today holds `BOT_TOKEN`, `LOGLEVEL`, `REDIS_URL`, `TZ`,
+   `ADMIN_CHAT_ID`, `DUMP_CHAT_ID` and `COOKIES_FILE`. This adds
+   `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` and `BOT_API_URL`; the same file is
+   read by `bot`, `worker` and the new service, so the two credentials reach the
+   server without being repeated anywhere.
 3. **Size limit becomes a setting.** `MAX_FILE_SIZE_BYTES` in
    `bot/util/youtube/video.py` is a module constant used by both the YouTube and
    the social path. It becomes `settings.max_upload_size_bytes`, defaulting to
