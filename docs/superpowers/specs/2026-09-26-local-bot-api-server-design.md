@@ -278,6 +278,34 @@ There is no test suite (`.claude/memory/project.md`). The checks are:
   themselves.
 - **Production**: a link that used to be split arrives as a single file.
 
+## Rehearsal results (2026-09-26, @assinstantbot, dev stack)
+
+- **Cloud-issued file ids survive the move.** Seeded under the cloud server
+  (Instagram video `dl2:`, YouTube video + audio `yt:`, SoundCloud track `da:` +
+  `au:`), then logOut and the local server: all three links and the 🎵 tap were
+  served straight from the cache, no rejection, no re-download, no CRITICAL.
+  The one link resent after the rollback was also a cache hit. **Decision: no
+  cache flush in production** (Task 10 skips it). The stale-id heal stays as the
+  safety net; its error-text match was not exercised, since nothing was rejected.
+- **Large video:** the 939 s VK video that used to arrive as three parts
+  (download ~110 MiB + 30 MiB, merged) arrived as one file. Upload to the local
+  server and on to Telegram took 13 s; no split, no retry.
+- **Uploads leave nothing on disk.** Volume before/after the video: 32344 ->
+  33648 bytes; `/tmp/telegram-bot-api` (temp dir, not on the volume) empty. The
+  server does not keep what the bot uploads -- only what it downloads.
+- **Volume layout** (token masked): `tqueue.binlog`, `webhooks_db.binlog` at the
+  root; per bot `<token>/td.binlog`, `<token>/temp/`, and one subdirectory per
+  downloaded file type -- the cookie upload landed in `<token>/documents/file_0.txt`
+  and stays there. State files are never inside a media subdirectory, so the
+  Task 8 allowlist is safe.
+- **Cookie jar download across containers works:** the worker (uid 0) read the
+  file through its read-only mount; the reply was the install step's own
+  `COOKIES_FILE is not set`, which runs only after download and decode succeed.
+- **Admin alert** through the local server: delivered.
+- **Rollback:** logOut from the local server, `BOT_API_URL` empty, bot polled the
+  cloud again 19 min after the first logOut and delivered a link.
+- The server's startup line prints its argv; no API id or hash in it.
+
 ## Open questions
 
 - Which image -- resolved 2026-09-26: `aiogram/telegram-bot-api`, pinned to the
