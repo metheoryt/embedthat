@@ -112,6 +112,31 @@ there, which fails rather than degrades, but fails at an arbitrary later moment.
    entry and re-downloads on `TelegramBadRequest`); the audio path must do the
    same, or every cached audio page raises after the migration.
 
+## Downloads in local mode
+
+In local mode `getFile` returns an absolute path on the **server's** filesystem
+instead of a URL, and aiogram follows suit: `Bot.download_file` branches on
+`session.api.is_local` and reads the path off the local disk
+(`aiogram/client/bot.py`, via `wrap_local_file.to_local`). Nothing is fetched
+over HTTP.
+
+`bot/worker/actors.py::_install_cookies_async` is the only code that downloads
+anything -- it pulls an uploaded cookie jar with `get_file` + `download_file`.
+It runs as a dramatiq actor, so it lives in the **worker** container, which
+therefore has to see the server's files at the same path the server reports:
+
+```yaml
+worker:
+    volumes:
+        - ./cookies:/cookies
+        - bot_api_data:/var/lib/telegram-bot-api:ro
+```
+
+Read-only, and only on `worker` -- the bot container never downloads. Mounting
+at the identical path avoids aiogram's path-translation wrapper entirely. Get
+this wrong and cookie installation breaks silently at the moment it is needed
+most: the jar is uploaded when the old one has already expired.
+
 ## `file_id` and the cache
 
 Assume every `file_id` cached before the move stops working, and verify rather
@@ -171,6 +196,4 @@ There is no test suite (`.claude/memory/project.md`). The checks are:
   building `tdlib/telegram-bot-api` ourselves. The prebuilt one is assumed here;
   it is a third-party build of a first-party source, which is worth a look before
   it holds the production token.
-- Whether `getFile` returning absolute local paths breaks anything we do. We
-  only ever upload and re-send by `file_id`; `install_cookies` is the one actor
-  that downloads (`COOKIES_FILE`), and it must be checked against local mode.
+- Nothing outstanding on `getFile`; see "Downloads in local mode" above.
