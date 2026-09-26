@@ -16,7 +16,7 @@ from bot.config import settings
 from bot.events.signals import on_social_video_sent, on_yt_video_sent
 from bot.util.audio.download import probe_link
 from bot.util.audio.exc import AudioDownloadError
-from bot.util.audio.pager import redeliver_page
+from bot.util.audio.pager import StaleFileIdsError, invalidate_page, redeliver_page
 from bot.util.audio.schema import AudioRequestData, AudioTrackData
 from bot.util.chat import is_group_chat
 from bot.util.cookies import CookieJarError
@@ -224,8 +224,17 @@ async def _save_tracks_to_cache(redis_client: redis.Redis, tracks: list[AudioTra
 async def _notify_audio_page_waiters_success(
     redis_client: redis.Redis, bot: Bot, waiters: list[Waiter], audio: AudioRequestData, page: int,
 ) -> None:
-    for waiter in waiters:
-        await redeliver_page(redis_client, bot, waiter.chat_id, waiter.reply_to_message_id, audio, page)
+    for i, waiter in enumerate(waiters):
+        try:
+            await redeliver_page(redis_client, bot, waiter.chat_id, waiter.reply_to_message_id, audio, page)
+        except StaleFileIdsError:
+            # A dead id came back from an `au:` key. redeliver_page has already
+            # cleared it, so a resend downloads; the rest of the waiters would
+            # otherwise get a misleading "no tracks could be downloaded".
+            await _notify_waiters_failure(
+                bot, waiters[i:], "❌ Couldn't deliver this page, please send the link again."
+            )
+            return
 
 
 @with_chat_action()
@@ -380,7 +389,19 @@ async def _process_social_link_async(bot: Bot, chat_id: int, url: str) -> None:
                 )
 
                 waiters = await _pop_waiters(redis_client, video.cache_key)
-                await _notify_waiters_success(bot, waiters, audio)
+                for i, waiter in enumerate(waiters):
+                    try:
+                        await _notify_waiters_success(bot, [waiter], audio)
+                    except TelegramBadRequest:
+                        # A dead id came back from an `au:` key (e.g. issued by the
+                        # other API server). Clear it so a resend downloads instead
+                        # of failing the same way on every retry.
+                        await invalidate_page(redis_client, audio, 1)
+                        waiter.ack_message_id = None  # already deleted -- reply instead
+                        await _notify_waiters_failure(
+                            bot, waiters[i:], "❌ Couldn't deliver this link, please send it again."
+                        )
+                        return
                 return
 
             try:

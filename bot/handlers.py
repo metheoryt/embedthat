@@ -11,7 +11,7 @@ from .config import settings
 from .dispatcher import router
 from .enum import LinkOrigin
 from .events import on_link_received, on_social_video_sent, on_yt_video_sent
-from .util.audio.pager import redeliver_page
+from .util.audio.pager import StaleFileIdsError, redeliver_page
 from .util.audio.schema import AudioRequestData
 from .util.chat import is_group_chat
 from .util.cookies import MAX_JAR_BYTES
@@ -200,13 +200,18 @@ async def get_audio(callback: types.CallbackQuery) -> None:
         if await asyncio.to_thread(video.ensure_metadata):
             # promote a pre-metadata entry so the next tap skips YouTube entirely
             await redis_client.set(cache_key, video.model_dump_json())
-        await callback.message.answer_audio(
-            video.audio_file_id,
-            performer=video.author,
-            title=video.title,
-            duration=video.length,
-        )
-        return
+        try:
+            await callback.message.answer_audio(
+                video.audio_file_id,
+                performer=video.author,
+                title=video.title,
+                duration=video.length,
+            )
+            return
+        except TelegramBadRequest:
+            log.info("cached audio file id for %s rejected, re-extracting", cache_key)
+            video.audio_file_id = None
+            await redis_client.set(cache_key, video.model_dump_json())
 
     log.info("cache miss for audio %s, registering waiter", cache_key)
     waiter = Waiter(
@@ -250,22 +255,25 @@ async def get_audio_page(callback: types.CallbackQuery) -> None:
     audio = AudioRequestData.model_validate_json(audio_raw)
     page_tracks = audio.page(page)
     if all(t.file_id for t in page_tracks):
-        await redeliver_page(
-            redis_client, callback.message.bot, callback.message.chat.id, root_message_id, audio, page,
-        )
-        return
+        try:
+            await redeliver_page(
+                redis_client, callback.message.bot, callback.message.chat.id, root_message_id, audio, page,
+            )
+            return
+        except StaleFileIdsError:
+            pass  # ids already cleared -- fall through to a fresh download
 
     log.info("cache miss for %s page %d, registering waiter", cache_key, page)
-    page_key = f"{cache_key}:page:{page}"
-    waiter = Waiter(
-        chat_id=callback.message.chat.id,
-        chat_type=callback.message.chat.type,
-        reply_to_message_id=root_message_id,
-    )
+    await _queue_audio_page(callback.message.chat.id, callback.message.chat.type, root_message_id, hash16, page)
+
+
+async def _queue_audio_page(chat_id: int, chat_type: str, root_message_id: int, hash16: str, page: int) -> None:
+    page_key = f"da:{hash16}:page:{page}"
+    waiter = Waiter(chat_id=chat_id, chat_type=chat_type, reply_to_message_id=root_message_id)
     is_first = await register_waiter(redis_client, page_key, waiter, _SOCIAL_WAITERS_TTL)
     if is_first:
         try:
-            process_audio_page.send(callback.message.chat.id, hash16, page)
+            process_audio_page.send(chat_id, hash16, page)
         except Exception:
             await clear_waiters(redis_client, page_key)
             raise
@@ -279,7 +287,10 @@ async def _process_social_url(message: Message, url: str) -> None:
     if audio_raw := await redis_client.get(audio.cache_key):
         cached_audio = AudioRequestData.model_validate_json(audio_raw)
         log.info("cache hit (audio) for %s", audio.cache_key)
-        await redeliver_page(redis_client, message.bot, message.chat.id, message.message_id, cached_audio, page=1)
+        try:
+            await redeliver_page(redis_client, message.bot, message.chat.id, message.message_id, cached_audio, page=1)
+        except StaleFileIdsError:
+            await _queue_audio_page(message.chat.id, message.chat.type, message.message_id, cached_audio.hash16, 1)
         return
 
     video = SocialVideoData.model_validate(dict(link=url))
