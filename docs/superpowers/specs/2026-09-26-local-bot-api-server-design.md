@@ -19,7 +19,39 @@ to be split and nothing needs to be re-encoded to fit.
   out of scope.** It was designed in the same conversation and deliberately
   deferred: once the limit is 2000 MB the size argument disappears, and whether
   a quality ceiling is still wanted is a separate decision to make against the
-  live result.
+  live result. The decisions that were settled are recorded below so they do not
+  have to be re-argued if it is picked up.
+
+  <details><summary>Deferred: the settled parameters</summary>
+
+  - A new `_normalize_video(media, output_dir) -> MediaFile` in
+    `bot/worker/pipeline.py`, called from `_handle_social_video` before the size
+    check; `_split_oversized` stays as the fallback. The YouTube path is not
+    touched.
+  - **Measure by the short side, not the height.** `scale=-2:480` pins the
+    height, which turns a portrait 1080x1920 into 270x480. Landscape caps the
+    height, portrait caps the width, and the 720 ceiling is read the same way.
+  - Two triggers: short side > 720 (always, even for a small file), or the file
+    exceeds the upload limit (then also drop to 480 if the short side is above
+    it).
+  - x264, chosen over x265 on purpose: at 480p HEVC saves only 20-30%, encodes
+    3-5x slower, and is not reliably playable in every Telegram client. The repo
+    already made this call once -- `bot/util/youtube/video.py::pick_stream`
+    filters YouTube streams to `avc1`.
+  - Audio: AAC 96 kbps. Opus was asked for and does not work here -- mobile
+    Telegram clients do not decode Opus in mp4, and the container where it is
+    standard (WebM) would force VP9 and 5-10x the CPU.
+  - Bitrate aims at a good 480p and no higher; below a floor of roughly
+    450 kbps the re-encode is skipped and the video is split instead, because
+    the agreed rule is not to sacrifice quality badly just to avoid a split.
+  - The arithmetic that makes this narrow: a 50 MB budget minus 192 kbps of
+    audio leaves one-file territory at about 6 minutes. Raising the upload limit
+    is what actually moves the split boundary -- which is why this spec exists
+    and that one is deferred.
+  - If encoding ever proves expensive on latitude, `/dev/dri` is not passed into
+    the worker today; VAAPI on the iGPU is the ready next step.
+
+  </details>
 - The splitting path stays in the code as a fallback. It is not removed.
 - No change to the YouTube stream-selection logic.
 
