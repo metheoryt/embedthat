@@ -24,7 +24,7 @@ from bot.util.cookies import install as install_cookie_jar
 from bot.util.redis_lock import HeartbeatLock
 from bot.util.social.exc import SocialDownloadError
 from bot.util.social.schema import SocialVideoData
-from bot.util.tg import make_bot
+from bot.util.tg import is_dead_file_id, make_bot
 from bot.util.youtube.enum import TargetLang
 from bot.util.youtube.exc import YouTubeError
 from bot.util.youtube.schema import YouTubeVideoData
@@ -392,7 +392,9 @@ async def _process_social_link_async(bot: Bot, chat_id: int, url: str) -> None:
                 for i, waiter in enumerate(waiters):
                     try:
                         await _notify_waiters_success(bot, [waiter], audio)
-                    except TelegramBadRequest:
+                    except TelegramBadRequest as e:
+                        if not is_dead_file_id(e):
+                            raise
                         # A dead id came back from an `au:` key (e.g. issued by the
                         # other API server). Clear it so a resend downloads instead
                         # of failing the same way on every retry.

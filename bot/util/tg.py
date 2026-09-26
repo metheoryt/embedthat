@@ -3,6 +3,7 @@ from typing import Any
 from aiogram import Bot
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
+from aiogram.exceptions import TelegramBadRequest
 
 from bot.config import settings
 
@@ -10,6 +11,16 @@ from bot.config import settings
 # only after it has pushed the file on to Telegram. Worker-only: polling adds the
 # session timeout to every getUpdates wait, so main.py must keep the default.
 UPLOAD_TIMEOUT = 30 * 60
+
+# What Telegram says when a cached file_id is unusable -- e.g. one issued by the
+# other API server. Every other 400 (reply target deleted, no rights in the chat)
+# says nothing about the ids, and must not wipe a cache every chat shares.
+_DEAD_FILE_ID_MARKERS = ("file identifier", "file_reference", "wrong remote file")
+
+
+def is_dead_file_id(error: TelegramBadRequest) -> bool:
+    message = error.message.lower()
+    return any(marker in message for marker in _DEAD_FILE_ID_MARKERS)
 
 
 def make_bot(token: str | None = None, *, uploads: bool = False, **kwargs: Any) -> Bot:

@@ -19,6 +19,7 @@ from .util.redis import redis_client
 from .util.social.download import normalize_social_url
 from .util.social.schema import SocialVideoData
 from .util.stats import build_stats_report
+from .util.tg import is_dead_file_id
 from .util.youtube.enum import TargetLang
 from .util.youtube.schema import YouTubeVideoData
 from .worker.actors import (
@@ -208,7 +209,9 @@ async def get_audio(callback: types.CallbackQuery) -> None:
                 duration=video.length,
             )
             return
-        except TelegramBadRequest:
+        except TelegramBadRequest as e:
+            if not is_dead_file_id(e):
+                raise
             log.info("cached audio file id for %s rejected, re-extracting", cache_key)
             video.audio_file_id = None
             await redis_client.set(cache_key, video.model_dump_json())

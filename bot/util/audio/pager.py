@@ -6,6 +6,7 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
 
 from bot.util.audio.schema import AudioRequestData
+from bot.util.tg import is_dead_file_id
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +39,8 @@ async def redeliver_page(
     try:
         new_ids = await audio.send_to_chat(bot, chat_id, reply_to_message_id=root_message_id, page=page)
     except TelegramBadRequest as e:
+        if not is_dead_file_id(e):
+            raise
         log.info("cached page %d of %s rejected (%s), clearing its file ids", page, audio.cache_key, e)
         await invalidate_page(redis_client, audio, page)
         raise StaleFileIdsError(audio.cache_key) from e
