@@ -81,7 +81,7 @@ telegram-bot-api:
     extends:
         file: ../compose.base.yml
         service: base
-    image: aiogram/telegram-bot-api:latest@sha256:<digest>   # pinned; see Open questions
+    image: aiogram/telegram-bot-api:latest@sha256:c48c15017c2dfbe02c2d0909b9786846969fcb1f4b3e6f021b9dca9dd57ec45a   # pinned; see Open questions
     env_file: [ .env ]          # TELEGRAM_API_ID, TELEGRAM_API_HASH
     environment:
         TELEGRAM_LOCAL: 1
@@ -280,9 +280,22 @@ There is no test suite (`.claude/memory/project.md`). The checks are:
 
 ## Open questions
 
-- Which image -- chosen 2026-09-26: `aiogram/telegram-bot-api`, **pinned by
-  digest**. **Not yet vetted:** reading its Dockerfile and entrypoint (does it
-  build from `tdlib/telegram-bot-api` source, honour `TELEGRAM_LOCAL`, echo the
-  API hash in its logs?) is plan Task 5, and the choice stands only if that
-  review passes. Task 5 replaces this bullet with the digest and its findings.
+- Which image -- resolved 2026-09-26: `aiogram/telegram-bot-api`, pinned to the
+  multi-arch index `sha256:c48c15017c2dfbe02c2d0909b9786846969fcb1f4b3e6f021b9dca9dd57ec45a`
+  (linux/amd64 manifest `sha256:dc60fb7f...a49f43d8`, built 2026-09-26T09:40Z).
+  Read before pinning:
+  - Built by the repo's own GitHub Actions (`multiarch.yml`, nightly cron and on
+    push) from a fresh checkout of `tdlib/telegram-bot-api` master with
+    submodules, compiled in an `alpine:3.21` build stage -- no downloaded binary.
+    The pin freezes whichever upstream commit that night's build took.
+  - Entrypoint builds the argv from env: `TELEGRAM_LOCAL` -> `--local`, port
+    8081 by default, `--dir=/var/lib/telegram-bot-api`,
+    `--temp-dir=/tmp/telegram-bot-api`, drops to uid/gid 101. `TELEGRAM_API_ID`
+    and `TELEGRAM_API_HASH` are read by the binary from the environment and are
+    **not** put on the command line, so the `echo "$COMMAND"` it prints on start
+    carries no secret. The stat port 8082 is only enabled by `TELEGRAM_STAT`,
+    which we do not set; nothing else is added.
+  - Files on the volume are owned by uid 101; the worker runs as root, so its
+    read-only mount can read them.
+  Updating it is a manual digest bump, never Tugtainer.
 - Nothing outstanding on `getFile`; see "Downloads in local mode" above.
