@@ -28,7 +28,7 @@ from .worker.actors import (
     process_youtube_audio,
     process_youtube_link,
 )
-from .worker.waiters import Waiter, register_waiter
+from .worker.waiters import Waiter, clear_waiters, register_waiter
 
 log = logging.getLogger(__name__)
 
@@ -264,7 +264,11 @@ async def get_audio_page(callback: types.CallbackQuery) -> None:
     )
     is_first = await register_waiter(redis_client, page_key, waiter, _SOCIAL_WAITERS_TTL)
     if is_first:
-        process_audio_page.send(callback.message.chat.id, hash16, page)
+        try:
+            process_audio_page.send(callback.message.chat.id, hash16, page)
+        except Exception:
+            await clear_waiters(redis_client, page_key)
+            raise
 
 
 async def _process_social_url(message: Message, url: str) -> None:
@@ -300,7 +304,14 @@ async def _process_social_url(message: Message, url: str) -> None:
     )
     is_first = await register_waiter(redis_client, video.cache_key, waiter, _SOCIAL_WAITERS_TTL)
     if is_first:
-        process_social_link.send(message.chat.id, url)
+        try:
+            process_social_link.send(message.chat.id, url)
+        except Exception:
+            # We are the only waiter (`is_first`), so nothing is in flight and
+            # dropping the list is safe -- leaving it makes every later send of
+            # this link a silent no-op for the whole TTL.
+            await clear_waiters(redis_client, video.cache_key)
+            raise
 
 
 @router.message(F.text.regexp(r"https?://"))

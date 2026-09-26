@@ -34,3 +34,13 @@ async def pop_waiters(redis_client: Redis, cache_key: str) -> list[Waiter]:
         pipe.delete(key)
         raw_entries, _ = await pipe.execute()
     return [Waiter.model_validate_json(raw) for raw in raw_entries]
+
+
+async def clear_waiters(redis_client: Redis, cache_key: str) -> None:
+    """
+    Drops every waiter registered for the key, rolling a registration back
+    when its job never reached the queue. The list is exactly what makes a
+    repeated link a no-op, so an orphaned one wedges that link until the TTL
+    expires -- no job in flight, no error, and every retry silently skipped.
+    """
+    await redis_client.delete(_waiters_key(cache_key))
