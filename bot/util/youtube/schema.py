@@ -5,6 +5,8 @@ from aiogram import Bot, types
 from pydantic import BaseModel, Field
 from pytubefix import YouTube
 
+from bot.config import settings
+
 from .enum import SourceLang, TargetLang
 from .exc import translates_youtube_errors
 
@@ -95,7 +97,7 @@ class YouTubeVideoData(BaseModel):
 
     @property
     def cache_key(self) -> str:
-        return f"yt:{self.yt.video_id}"
+        return youtube_cache_key(self.yt.video_id)
 
     @property
     def caption(self) -> str:
@@ -155,3 +157,7 @@ class YouTubeVideoData(BaseModel):
                 caption=self.caption,
                 reply_markup=self.audio_button_markup,
             )
+
+
+def youtube_cache_key(video_id: str) -> str:
+    return f"yt{settings.video_cache_tag}:{video_id}"

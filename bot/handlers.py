@@ -21,7 +21,7 @@ from .util.social.schema import SocialVideoData
 from .util.stats import build_stats_report
 from .util.tg import is_dead_file_id
 from .util.youtube.enum import TargetLang
-from .util.youtube.schema import YouTubeVideoData
+from .util.youtube.schema import YouTubeVideoData, youtube_cache_key
 from .worker.actors import (
     install_cookies,
     process_audio_page,
@@ -182,7 +182,7 @@ async def get_audio(callback: types.CallbackQuery) -> None:
         return
 
     video_id = callback.data.removeprefix("aud:")
-    cache_key = f"yt:{video_id}"
+    cache_key = youtube_cache_key(video_id)
 
     video_raw = await redis_client.get(cache_key)
     if not video_raw:

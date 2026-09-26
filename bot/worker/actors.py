@@ -27,7 +27,7 @@ from bot.util.social.schema import SocialVideoData
 from bot.util.tg import is_dead_file_id, make_bot
 from bot.util.youtube.enum import TargetLang
 from bot.util.youtube.exc import YouTubeError
-from bot.util.youtube.schema import YouTubeVideoData
+from bot.util.youtube.schema import YouTubeVideoData, youtube_cache_key
 from bot.util.youtube.video import get_audio_stream
 from bot.util.ytdlp import TransientDownloadError, is_login_wall
 from bot.worker.broker import (
@@ -284,7 +284,7 @@ def process_youtube_link(chat_id: int, link: str, target_lang: str) -> None:
 async def _process_youtube_audio_async(bot: Bot, chat_id: int, video_id: str, reply_to_message_id: int) -> None:
     redis_client = redis.from_url(str(settings.redis_dsn), decode_responses=True)
     try:
-        cache_key = f"yt:{video_id}"
+        cache_key = youtube_cache_key(video_id)
         audio_waiters_key = f"{cache_key}:audio"
 
         video_raw = await redis_client.get(cache_key)

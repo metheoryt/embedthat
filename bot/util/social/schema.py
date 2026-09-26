@@ -4,6 +4,8 @@ from typing import Literal
 from aiogram import Bot, types
 from pydantic import BaseModel, Field
 
+from bot.config import settings
+
 # aiogram types `send_media_group`'s argument as an invariant list of this union,
 # so building a narrower `list[InputMediaPhoto | InputMediaVideo]` is rejected even
 # though every element fits.
@@ -60,7 +62,8 @@ class SocialVideoData(BaseModel):
         # `dl2:`, not `dl:` -- entries written under the old prefix hold the
         # pre-carousel `file_ids: list[str]` shape and no longer validate. The
         # bump retires them on their own TTL instead of needing a migration.
-        return f"dl2:{hashlib.sha256(self.link.encode()).hexdigest()[:16]}"
+        # The tag keeps the local API server's entries apart (Settings.video_cache_tag).
+        return f"dl2{settings.video_cache_tag}:{hashlib.sha256(self.link.encode()).hexdigest()[:16]}"
 
     @property
     def caption(self) -> str:

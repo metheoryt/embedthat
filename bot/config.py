@@ -59,6 +59,15 @@ class Settings(BaseSettings):
             return 2000 * 1000 * 1000
         return 50 * 1024 * 1024
 
+    @property
+    def video_cache_tag(self) -> str:
+        # Video cache keys are per API server. Under the cloud's 50 MB limit a long
+        # video was cached as parts, and the local server would keep serving those
+        # parts; its own keys make it fetch each video once, whole, and leave the
+        # cloud's entries intact for a rollback. Audio keys stay shared: nothing was
+        # split there, and cloud file ids work on the local server (2026-09-26).
+        return "l" if self.bot_api_url else ""
+
     def now(self) -> datetime:
         return datetime.now(self.timezone)
 
