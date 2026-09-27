@@ -215,9 +215,9 @@ actor limit below is for that, and for the download and the upload.
   `_YOUTUBE_WAITERS_TTL`. With 3 attempts x 45 min plus backoff the retry budget
   is ~2.5 h; at 90 min a job that succeeded on its last retry would deliver to an
   expired waiter list and the user would get silence.
-- **Carousels:** one yt-dlp call downloads all positions with one set of
-  options, so the whole batch gets one rung -- the lowest any item needs.
-  Carousel items are short, so in practice that is 1080 or the source's own best.
+- **Carousels:** one yt-dlp call downloads all positions with one set of merger
+  options, so the post gets one merger rung -- the lowest any entry *without a
+  ready file* needs. Ready items ignore it: nothing re-encodes them.
 - **Short side in yt-dlp:** `[height>=R][width>=R]` above, without `>=?`: every
   video format probed on Instagram, VK and TikTok carried a width (2026-09-27);
   the formats without one (Instagram's `0..3`, VK's `url720`) carry no codec or
