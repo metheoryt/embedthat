@@ -30,7 +30,9 @@
 2. **An HEVC single file** (TikTok's `bytevc1_720p`) -- must never be chosen: nothing re-encodes a single file, and HEVC is not reliably playable in every Telegram client. Pinned by the HEVC exclusion in `_format_spec` and the TikTok line of the Task 3 probe.
 3. **A portrait video** (1080x1920 reel) -- must keep its 1080 short side on both paths, never 270x480 or 608x1080. Pinned by the `scale_filter` / `rung_candidates` asserts in Task 1, the ffmpeg run in Task 3, and the reel in Task 5.
 4. **A rollback to the cloud server** (`BOT_API_URL` unset, 50 MB) -- all caps collapse to 50 MB and the ladder still ends in "480, split". Pinned by the cloud assertions in Task 1.
-5. **A carousel mixing a merged item with silent video-only items of unknown size** (Instagram `DdLlGOuGdlE`) -- one rung for the batch; an unknown size must not push the batch down. Pinned by the Instagram line of the Task 3 probe (expected 1080).
+5. **The download pass sees different formats than the probe** (the cookie retry in `extract_info` re-extracts with the jar; CDNs vary between calls) -- a strict single-rung spec would fail the post with "Requested format is not available". The download spec chains from the chosen rung down to the lowest, loose, rung (`_download_spec`), so the worst case is a lower rung, never a failure. Pinned by the `_download_spec` assert in Task 3 Step 6.
+6. **A merged social video with no duration in its metadata** (every Instagram probe on 2026-09-27: carousel items AND single reels) -- must not get an unbounded 1080 re-encode. The duration is read by ffprobe from the selected video format's URL (0.6 s on a reel); if that fails too, rungs with a duration ceiling are skipped. Pinned by the Instagram line of the Task 3 probe (prints the duration it found).
+7. **A carousel mixing a merged item with silent video-only items of unknown size** (Instagram `DdLlGOuGdlE`) -- one rung for the batch; an unknown size must not push the batch down. Pinned by the Instagram line of the Task 3 probe (expected 1080).
 
 ---
 
@@ -70,6 +72,8 @@ bash $BASE/gate.sh
 ```
 
 Expected: both NEW sections empty, `imports ok`. If the import smoke fails on the clean tree, record the exact error and treat it as the baseline. Nothing to commit.
+
+If a later task's gate shows new `reportUnknown*` findings at a yt-dlp or pytubefix boundary, the accepted fix is a boundary `cast`, as `bot/util/ytdlp.py::_extract` does -- do not chase the library's types.
 
 ---
 
@@ -523,9 +527,19 @@ def _format_spec(rung: int) -> str:
     return spec
 
 
+def _download_spec(rung: int) -> str:
+    """What the download pass asks for: the chosen rung, then every rung below it,
+    ending in the lowest rung's loose tail. The download is a second extraction
+    (with the cookie jar, if the site walled the anonymous one) and may see other
+    formats than the probe; the worst case is then a lower rung, never "Requested
+    format is not available". Safe for size and time: a lower source is smaller
+    than the chosen rung's bound, and the scale expression only ever shrinks."""
+    return "/".join(_format_spec(r) for r in rungs() if r <= rung)
+
+
 def _base_opts(rung: int) -> dict[str, Any]:
     return {
-        "format": _format_spec(rung),
+        "format": _download_spec(rung),
         "merge_output_format": "mp4",
         "quiet": True,
         # `noplaylist` is deliberately absent. A carousel URL *is* the playlist, so
@@ -539,6 +553,28 @@ def _base_opts(rung: int) -> dict[str, Any]:
 - [ ] **Step 3: Add the per-entry rung choice (below `_entries_of`)**
 
 ```python
+def _selector_ydl() -> yt_dlp.YoutubeDL:
+    """A YoutubeDL used only for `build_format_selector` -- no network."""
+    return yt_dlp.YoutubeDL({"quiet": True})
+
+
+def _url_duration(fmt: dict[str, Any]) -> int:
+    """Duration read by ffprobe from a format's URL -- the moov atom only, 0.6 s on
+    an Instagram reel (2026-09-27). Instagram gives no duration in the probe, for
+    carousel items and single reels alike. 0 when it fails."""
+    url = fmt.get("url")
+    if not url:
+        return 0
+    headers = "".join(f"{k}: {v}\r\n" for k, v in (fmt.get("http_headers") or {}).items())
+    try:
+        # kwargs become ffprobe flags; -timeout is ffprobe's HTTP timeout, in microseconds
+        probe = ffmpeg.probe(url, v="error", show_entries="format=duration", headers=headers, timeout=30_000_000)
+        return int(float(probe["format"]["duration"]))
+    except Exception as e:
+        log.warning("could not read the duration of %s: %s", fmt.get("format_id"), e)
+        return 0
+
+
 def _select_format(ydl: yt_dlp.YoutubeDL, entry: dict[str, Any], rung: int) -> dict[str, Any] | None:
     """What yt-dlp would download for `entry` at `rung`, from the probe's info --
     no second extraction. The ctx mirrors YoutubeDL.process_video_result."""
@@ -554,13 +590,18 @@ def _select_format(ydl: yt_dlp.YoutubeDL, entry: dict[str, Any], rung: int) -> d
 
 def _entry_rung(ydl: yt_dlp.YoutubeDL, entry: dict[str, Any]) -> int:
     """The highest rung this entry reaches and fits in one file at its own cap."""
-    duration = entry.get("duration") or 0  # Instagram carousel entries carry none
+    duration = int(entry.get("duration") or 0)
     for rung in rungs():
         fmt = _select_format(ydl, entry, rung)
         if fmt is None:
             continue  # the source does not reach this rung
         if fmt.get("requested_formats"):  # merged, so re-encoded
-            if duration > _ENCODE_MAX_DURATION.get(rung, math.inf):
+            if not duration:
+                duration = _url_duration(fmt["requested_formats"][0])
+            ceiling = _ENCODE_MAX_DURATION.get(rung, math.inf)
+            # Unknown length: only a rung without a ceiling -- encoding time is
+            # the one limit that kills the job instead of splitting it.
+            if duration > ceiling or (not duration and ceiling != math.inf):
                 continue
             kbps = _ENCODE_MAXRATE_KBPS[rung] + _ENCODE_AUDIO_KBPS
             estimate = int(duration * kbps * 1000 / 8) if duration else None
@@ -619,7 +660,7 @@ Replace the `if video_positions:` block's first line group so it reads:
     if video_positions:
         # One yt-dlp call downloads every position with one set of options, so the
         # post gets one rung: the lowest any of its videos needs.
-        with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
+        with _selector_ydl() as ydl:
             rung = min(_entry_rung(ydl, entries[pos]) for pos in video_positions)
         log.info("%s: %dp for %d video(s)", url, rung, len(video_positions))
         downloaded = _download_positions(url, video_positions, output_dir, rung)
@@ -643,20 +684,27 @@ expected = {
     "https://www.tiktok.com/@scout2015/video/6718335390845095173": 480,  # 720 is HEVC only -> h264 540p
     "https://www.instagram.com/p/DdLlGOuGdlE/": 1080,  # merged item + silent VP9 items of unknown size
 }
+spec = D._download_spec(1080)
+assert spec.count("worstvideo") == 3 and spec.endswith("/best[ext=mp4]/best"), spec
+assert "/best" not in D._format_spec(720), D._format_spec(720)
+
 ok = True
 for url, want in expected.items():
-    with yt_dlp.YoutubeDL({**D._base_opts(D.lowest_rung()), "playlist_items": "1,2,3"}) as ydl:
-        info = ydl.extract_info(url, download=False)
-        entries = [e for e in D._entries_of(info) if e and e.get("formats")]
+    with yt_dlp.YoutubeDL({**D._base_opts(D.lowest_rung()), "playlist_items": "1,2,3"}) as probe:
+        info = probe.extract_info(url, download=False)
+    entries = [e for e in D._entries_of(info) if e and e.get("formats")]
+    with D._selector_ydl() as ydl:  # the same selector instance production uses
         got = min(D._entry_rung(ydl, e) for e in entries)
         chosen = D._select_format(ydl, entries[0], got)
-    print(url, "->", got, chosen and chosen.get("format_id"), chosen and chosen.get("vcodec"))
+    parts = (chosen or {}).get("requested_formats") or [chosen or {}]
+    print(url, "->", got, chosen and chosen.get("format_id"), chosen and chosen.get("vcodec"),
+          "duration", entries[0].get("duration") or D._url_duration(parts[0]))
     ok &= got == want
 sys.exit(0 if ok else 1)
 ```
 
 Run: `BOT_TOKEN=1:x DUMP_CHAT_ID=0 BOT_API_URL=http://x uv run --frozen python /tmp/embedthat-ladder-baseline/t3.py`
-Expected: VK -> 720 (an `hls_fmp4-*+dash_sep-*` pair, avc1), TikTok -> 480 (`h264_540p_*`, not `bytevc1`), Instagram -> 1080; exit 0. If Instagram answers with a login wall from this host, rerun that one link inside the dev worker in Task 5 instead and note it.
+Expected: VK -> 720 (an `hls_fmp4-*+dash_sep-*` pair, avc1, duration 939), TikTok -> 480 (`h264_540p_*`, not `bytevc1`), Instagram -> 1080 with a non-zero duration from ffprobe; exit 0. If Instagram answers with a login wall from this host, rerun that one link inside the dev worker in Task 5 instead and note it.
 
 - [ ] **Step 7: The merger's scale expression on a portrait source, in the image**
 
@@ -772,6 +820,8 @@ services:
 EOF
 ```
 
+If host port 6379 is taken by another dev redis, add `redis: { ports: !reset [] }` to `local.yml`.
+
 - [ ] **Step 3: Log the debug bot out of the cloud, start the local stack**
 
 ```bash
@@ -800,7 +850,7 @@ Ask the user to send, one at a time, and after each run
 
 1. A portrait Instagram reel -> one file, width 1080 (or the reel's own width if lower); the log shows `1080p` for it.
 2. The VK video `https://vkvideo.ru/video-164579181_456242552` -> one file at 1280x720, `720p for 1 video(s)`; record the job's wall time (must be well under 45 min).
-3. A YouTube video of 45-90 min -> the log shows `1080p: ...Mb estimated, over its cap -- skipped without download` and `selected 720p`; one file.
+3. A YouTube video of 45-90 min -> the log shows `1080p: ...Mb estimated, over its cap -- skipped without download` and `selected 720p`; one file. **Record the upload wall time** (from `sending 1 part(s) to dump chat` to the next line): the 2026-09-26 rehearsal pushed ~140 MB in 13 s (~10 MB/s), which puts 2 GB at ~3.5 min against the 30-min `UPLOAD_TIMEOUT` in `bot/util/tg.py`; a much slower number here is a finding to raise before release.
 4. A short YouTube video -> `selected 1080p`, `(copy)` in the merge line, no `libx264`.
 5. A TikTok -> `480p`, delivered, plays on the user's phone.
 

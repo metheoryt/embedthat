@@ -126,7 +126,11 @@ selector with no loose tail:
 - rung 480: the same, followed by today's loose tail `/best[ext=mp4]/best`, so a
   source below 480 still downloads as it does today.
 
-"The selector matches nothing" means "try the next rung". Selection is re-applied
+"The selector matches nothing" means "try the next rung". Strictness is for the
+decision only: the download pass is a second extraction (with the cookie jar if
+the anonymous one hit a login wall) and may see other formats, so it asks for the
+chosen rung, then each rung below it, ending in the loose tail -- a mismatch costs
+a rung, never the post. Selection is re-applied
 to the probe pass's info for each rung without re-extracting (the plan pins the
 exact yt-dlp call); the selected format tells us both whether the rung exists and
 which kind of download it is:
@@ -158,6 +162,17 @@ Synthetic `testsrc2` read 2.7x faster than real footage and is not used for
 sizing. Scaled by pixel count from the real clip, `veryfast` gives roughly:
 1080p ~32 fps, 720p ~72, 480p ~140.
 
+**Unknown duration.** Instagram gives none in the probe, for carousel items and
+single reels alike (2026-09-27). The duration is then read by ffprobe from the
+selected video format's URL (0.6 s on a reel). If that fails too, rungs with a
+duration ceiling are skipped: encoding time is the one limit that kills the job
+instead of splitting it.
+
+**Upload time.** The 2026-09-26 rehearsal pushed ~140 MB through the local server
+and on to Telegram in 13 s (~10 MB/s): 2 GB is ~3.5 min against the worker's
+30-minute upload timeout (`bot/util/tg.py`). Re-measured on a large file in the
+rehearsal.
+
 **Time budget (merged only).** A rung is allowed only if the duration is within
 its threshold: **1080 up to 10 min, 720 up to 30 min, 480 beyond**. Worst cases
 at 30 fps source: 10 min at 1080 ~9 min of encoding, 30 min at 720 ~13 min,
@@ -172,10 +187,6 @@ actor limit below is for that, and for the download and the upload.
   `_YOUTUBE_WAITERS_TTL`. With 3 attempts x 45 min plus backoff the retry budget
   is ~2.5 h; at 90 min a job that succeeded on its last retry would deliver to an
   expired waiter list and the user would get silence.
-- **Upload time is not measured** for files near 2 GB (the rehearsal's largest
-  upload was far smaller). The biggest social outputs the thresholds allow are
-  ~470 MB at 1080, ~700 MB at 720, ~1.1 GB for a 90-minute 480 -- the first
-  production runs of each are watched in the worker log.
 - **Carousels:** one yt-dlp call downloads all positions with one set of
   options, so the whole batch gets one rung -- the lowest any item needs.
   Carousel items are short, so in practice that is 1080 or the source's own best.
