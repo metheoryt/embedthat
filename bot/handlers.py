@@ -131,7 +131,7 @@ async def upload_cookies(message: types.Message) -> None:
 
 
 @router.message(
-    F.text.regexp(r"^https://(((www|m)\.)?youtube\.com/(watch|shorts/)|youtu\.be/)")
+    F.text.regexp(r"^https://(((www|m)\.)?youtube\.com/(watch|shorts/|live/)|youtu\.be/)")
 )
 async def embed_youtube_videos(message: types.Message) -> None:
     await on_link_received.send(message, LinkOrigin.YOUTUBE)
