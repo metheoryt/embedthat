@@ -4,7 +4,7 @@
 
 **Goal:** Deliver videos at the best of 1080p / 720p / 480p that fits its per-rung size cap in one file, and split only when even 480p does not fit in the upload limit -- on both the YouTube and the social path.
 
-**Architecture:** A new `bot/util/ladder.py` holds the rule (rungs, per-rung caps clipped to the upload limit, the fit check, candidate selection by short side, the scale filters). The YouTube path (`pick_stream`) loops rungs outermost, estimating from `stream.filesize` before downloading. The social path picks one rung per post before downloading, by re-running yt-dlp's format selector on the probe pass's info per rung, and bounds the re-encode with a per-rung bitrate ceiling so its size is known in advance.
+**Architecture:** A new `bot/util/ladder.py` holds the rule (rungs, per-rung caps clipped to the upload limit, the fit check, candidate selection by short side, the scale filters). The YouTube path (`pick_stream`) loops rungs outermost, estimating from `stream.filesize` before downloading. The social path sends a ready h264 file with sound as downloaded whenever one exists (a callable yt-dlp format selector decides per entry); only entries without one take the merged ladder, whose re-encode is bounded by a per-rung bitrate ceiling so its size is known in advance.
 
 **Tech Stack:** Python 3.12, pytubefix, yt-dlp 2026.08.19 (`YoutubeDL.build_format_selector`), ffmpeg / x264, dramatiq + redis, pydantic-settings.
 
@@ -14,7 +14,7 @@
 
 - There is **no test suite**. The gate per task is: no NEW pyright/ruff findings versus the Task 0 baseline (compare finding sets, not totals), the import smoke test through all four doors (`main.py`, `bot.worker.actors`, `bot.events`, `bot.events.handlers.stats`), plus the task's own `python -` assertion script.
 - Rungs `(1080, 720, 480)`, measured by the **short side**. Caps per file: 1080 -> 1000 MB, 720 -> 1500 MB, 480 -> 2000 MB, decimal MB, each clipped to `settings.max_upload_size_bytes`. Margin 0.98.
-- Social merged encode: `-preset veryfast`, maxrate 6000/3000/1500 kbit/s with bufsize 2x, audio `-b:a 128k`. Duration thresholds for a merged rung: 1080 <= 600 s, 720 <= 1800 s, 480 unlimited.
+- Social: a ready file (mp4, h264, 4:2:0, with sound) is never re-encoded. Merged encode (fallback only): `-preset veryfast`, maxrate 6000/3000/1500 kbit/s with bufsize 2x, audio `-b:a 128k`. Duration thresholds for a merged rung: 1080 <= 600 s, 720 <= 1800 s, 480 unlimited.
 - `process_social_link` `time_limit` 45 min; `_SOCIAL_WAITERS_TTL` 3 h; `video_cache_tag` `"l2"` locally, `""` on the cloud (unchanged).
 - Splitting stays at 480, against the upload limit, as today.
 - Never edit in the main checkout `/home/me/my/embedthat`. This worktree only (`/home/me/orca/workspaces/embedthat/resolution-ladder`, branch `work/resolution-ladder`).
@@ -26,13 +26,13 @@
 
 ## Review Focus
 
-1. **A source that tops out below the top rung** (the VK video: best 1280x720; a TikTok: best h264 576x1024) -- must be taken at its own rung, not caught by the loose `/best` tail at 1080. Pinned by the probe script in Task 3 (VK -> 720, TikTok -> 480).
-2. **An HEVC single file** (TikTok's `bytevc1_720p`) -- must never be chosen: nothing re-encodes a single file, and HEVC is not reliably playable in every Telegram client. Pinned by the HEVC exclusion in `_format_spec` and the TikTok line of the Task 3 probe.
-3. **A portrait video** (1080x1920 reel) -- must keep its 1080 short side on both paths, never 270x480 or 608x1080. Pinned by the `scale_filter` / `rung_candidates` asserts in Task 1, the ffmpeg run in Task 3, and the reel in Task 5.
+1. **A ready file under the lowest rung while a bigger one exists** (a long VK video whose ready 720 and 480 both miss their caps) -- must go out as the lowest ready file that reaches 480, split after download if needed, never as a ready 360. Pinned by `_ready_file`'s order (`reaching` before `below`) and reviewed against the spec's order in Task 3.
+2. **An HEVC single file** (TikTok's `bytevc1_720p`) -- must never be chosen: nothing re-encodes a single file, and HEVC is not reliably playable in every Telegram client. Pinned by `_ready_info`'s codec check, `_NO_HEVC` in the fallback, and the TikTok line of the Task 3 probe.
+3. **A portrait video** (1080x1920) -- must keep its short side on both paths, never 270x480 or 608x1080. Pinned by the `scale_filter` / `rung_candidates` asserts in Task 1, the ffmpeg run in Task 3, and the reel in Task 5.
 4. **A rollback to the cloud server** (`BOT_API_URL` unset, 50 MB) -- all caps collapse to 50 MB and the ladder still ends in "480, split". Pinned by the cloud assertions in Task 1.
-5. **The download pass sees different formats than the probe** (the cookie retry in `extract_info` re-extracts with the jar; CDNs vary between calls) -- a strict single-rung spec would fail the post with "Requested format is not available". The download spec chains from the chosen rung down to the lowest, loose, rung (`_download_spec`), so the worst case is a lower rung, never a failure. Pinned by the `_download_spec` assert in Task 3 Step 6.
-6. **A merged social video with no duration in its metadata** (every Instagram probe on 2026-09-27: carousel items AND single reels) -- must not get an unbounded 1080 re-encode. The duration is read by ffprobe from the selected video format's URL (0.6 s on a reel); if that fails too, rungs with a duration ceiling are skipped. Pinned by the Instagram line of the Task 3 probe (prints the duration it found).
-7. **A carousel mixing a merged item with silent video-only items of unknown size** (Instagram `DdLlGOuGdlE`) -- one rung for the batch; an unknown size must not push the batch down. Pinned by the Instagram line of the Task 3 probe (expected 1080).
+5. **The download pass sees different formats than the probe** (the cookie retry in `extract_info` re-extracts with the jar; CDNs vary between calls) -- the ready choice is re-made inside the download pass (callable selector), and the fallback chains from the chosen rung down to the lowest, loose, rung, so the worst case is a lower rung, never "Requested format is not available". Pinned by the `_download_spec` asserts in Task 3 Step 7.
+6. **A merged social video with no duration in its metadata** (every Instagram probe on 2026-09-27) -- must not get an unbounded 1080 re-encode: ffprobe reads it from the URL; if that fails too, rungs with a duration ceiling are skipped. Reached only by entries without a ready file.
+7. **A carousel mixing a ready item with silent video-only items** (Instagram `DdLlGOuGdlE`) -- the ready item goes as is; the silent ones take the ladder, as today; the merger rung comes from the silent ones only. Pinned by the carousel line of the Task 3 probe.
 
 ---
 
@@ -476,18 +476,24 @@ git push
 
 ---
 
-### Task 3: Social -- one rung per post, chosen before download
+### Task 3: Social -- a ready file first, the merged ladder only as the fallback
 
 **Files:**
-- Modify: `bot/util/social/download.py` (`_base_opts`, `_download_positions`, `download_social_video`; new `_format_spec`, `_select_format`, `_entry_rung`)
+- Modify: `bot/util/social/download.py` (`_base_opts`, `_download_positions`, `download_social_video`; new `_format_spec`, `_download_spec`, `_selector_ydl`, `_probe_url`, `_url_duration`, `_ready_info`, `_rung_of`, `_ready_file`, `_select_format`, `_entry_rung`, `_selector`)
 
 **Interfaces:**
 - Consumes: `ladder.rungs`, `ladder.lowest_rung`, `ladder.fits`, `ladder.scale_expression` (Task 1).
-- Produces: `download_social_video(url: str, output_dir: Path) -> DownloadResult` (the `max_res` parameter is gone; the only caller, `bot/worker/pipeline.py::_handle_social_video`, passes `(video.link, tmp_path)` and needs no change). `_entry_rung(ydl, entry) -> int` is private but the Task 3 probe script calls it.
+- Produces: `download_social_video(url: str, output_dir: Path) -> DownloadResult` (the `max_res` parameter is gone; the only caller, `bot/worker/pipeline.py::_handle_social_video`, passes `(video.link, tmp_path)` and needs no change). The private helpers are called by the Task 3 probe script.
+
+**The order** (spec, "Social path"): per video entry,
+1. a **ready file** -- mp4, h264, 4:2:0 (or unknown), with sound -- is sent exactly as downloaded, no re-encode: the highest one whose short side is between the lowest and the top rung and whose size fits its own rung's cap; if files reaching the lowest rung exist but none fits, the lowest of them, as is (`_split_oversized` splits it after download if it is over the upload limit); a ready file below the lowest rung only when nothing reaches it;
+2. **no ready file** (DASH-only sites, silent Instagram items with no sound): the merged ladder -- strict per-rung selectors, `veryfast` + bitrate ceiling, duration ceilings. The post's merger rung is the minimum over its merged entries only.
+
+Measured 2026-09-27, all fast-start (`moov` before `mdat`): VK `url720` is h264 High 1280x720 yuv420p + AAC, 219 MB, 939 s; Instagram reel formats `1/2/3` are h264 720x1280 yuv420p + AAC, and yt-dlp reports no codec, size or dimensions for them, so they are read with ffprobe from their URL (~0.6 s each).
 
 - [ ] **Step 1: Imports and constants**
 
-In `bot/util/social/download.py`: add `import math` to the stdlib imports, `import yt_dlp` to the third-party ones, and below `from bot.util.ytdlp import extract_info`:
+In `bot/util/social/download.py`: add `import math` to the stdlib imports, `from collections.abc import Callable, Iterator`, `import yt_dlp` to the third-party ones, and below `from bot.util.ytdlp import extract_info`:
 
 ```python
 from bot.util.ladder import fits, lowest_rung, rungs, scale_expression
@@ -496,9 +502,9 @@ from bot.util.ladder import fits, lowest_rung, rungs, scale_expression
 Below `_PHOTO_FETCH_TIMEOUT = 30`:
 
 ```python
-# The merger always re-encodes, so the source size says nothing about the
-# output. A per-rung bitrate ceiling does: duration x (ceiling + audio) bounds
-# the file before a byte is downloaded.
+# Fallback only (no ready file): the merger always re-encodes, so the source size
+# says nothing about the output. A per-rung bitrate ceiling does: duration x
+# (ceiling + audio) bounds the file before a byte is downloaded.
 _ENCODE_MAXRATE_KBPS = {1080: 6000, 720: 3000, 480: 1500}
 _ENCODE_AUDIO_KBPS = 128
 # Encoding time, not size, is what binds a merged download: measured 2026-09-27
@@ -508,9 +514,14 @@ _ENCODE_MAX_DURATION = {1080: 10 * 60, 720: 30 * 60}
 # A single file is sent as downloaded, never re-encoded -- and HEVC does not
 # play in every Telegram client (TikTok serves bytevc1 at 720p, 2026-09-27).
 _NO_HEVC = "[vcodec!~='^(h265|hevc|hev1|hvc1|bytevc1)']"
+# The options the fallback selector is compiled with: a merged pick's `ext`
+# comes from the compiling instance's `merge_output_format`.
+_SELECTOR_OPTS: dict[str, Any] = {"quiet": True, "merge_output_format": "mp4"}
 ```
 
-- [ ] **Step 2: Replace `_base_opts` with the strict per-rung selector**
+- [ ] **Step 2: Strict per-rung spec, the chained download spec, `_base_opts`**
+
+Replace `_base_opts` with:
 
 ```python
 def _format_spec(rung: int) -> str:
@@ -518,8 +529,8 @@ def _format_spec(rung: int) -> str:
     moves down a rung. Only the lowest rung keeps the old loose tail -- at a
     higher one it would catch every source below the rung and send it
     un-re-encoded. Short side >= rung means both sides >= rung; every video
-    format probed on Instagram, VK and TikTok carried a width (2026-09-27), so
-    no `>=?`."""
+    format with a codec probed on Instagram, VK and TikTok carried a width
+    (2026-09-27), so no `>=?`."""
     fit = f"[height>={rung}][width>={rung}]"
     spec = f"worstvideo[ext=mp4]{fit}+bestaudio[ext=m4a]/worst[ext=mp4]{fit}{_NO_HEVC}"
     if rung == lowest_rung():
@@ -528,18 +539,19 @@ def _format_spec(rung: int) -> str:
 
 
 def _download_spec(rung: int) -> str:
-    """What the download pass asks for: the chosen rung, then every rung below it,
-    ending in the lowest rung's loose tail. The download is a second extraction
-    (with the cookie jar, if the site walled the anonymous one) and may see other
-    formats than the probe; the worst case is then a lower rung, never "Requested
-    format is not available". Safe for size and time: a lower source is smaller
-    than the chosen rung's bound, and the scale expression only ever shrinks."""
+    """The fallback the download pass asks for: the chosen rung, then every rung
+    below it, ending in the lowest rung's loose tail. The download is a second
+    extraction (with the cookie jar, if the site walled the anonymous one) and may
+    see other formats than the probe; the worst case is then a lower rung, never
+    "Requested format is not available". Safe for size and time: a lower source
+    is smaller than the chosen rung's bound, and the scale expression only
+    shrinks."""
     return "/".join(_format_spec(r) for r in rungs() if r <= rung)
 
 
-def _base_opts(rung: int) -> dict[str, Any]:
+def _base_opts(fmt: str | Callable[[dict[str, Any]], Iterator[dict[str, Any]]]) -> dict[str, Any]:
     return {
-        "format": _download_spec(rung),
+        "format": fmt,
         "merge_output_format": "mp4",
         "quiet": True,
         # `noplaylist` is deliberately absent. A carousel URL *is* the playlist, so
@@ -550,29 +562,104 @@ def _base_opts(rung: int) -> dict[str, Any]:
     }
 ```
 
-- [ ] **Step 3: Add the per-entry rung choice (below `_entries_of`)**
+- [ ] **Step 3: Ready files (below `_entries_of`)**
 
 ```python
-def _selector_ydl() -> yt_dlp.YoutubeDL:
-    """A YoutubeDL used only for `build_format_selector` -- no network."""
-    return yt_dlp.YoutubeDL({"quiet": True})
-
-
-def _url_duration(fmt: dict[str, Any]) -> int:
-    """Duration read by ffprobe from a format's URL -- the moov atom only, 0.6 s on
-    an Instagram reel (2026-09-27). Instagram gives no duration in the probe, for
-    carousel items and single reels alike. 0 when it fails."""
+def _probe_url(fmt: dict[str, Any]) -> dict[str, Any]:
+    """ffprobe of a format's URL -- the header only, ~0.6 s. {} when it fails."""
     url = fmt.get("url")
     if not url:
-        return 0
+        return {}
     headers = "".join(f"{k}: {v}\r\n" for k, v in (fmt.get("http_headers") or {}).items())
     try:
         # kwargs become ffprobe flags; -timeout is ffprobe's HTTP timeout, in microseconds
-        probe = ffmpeg.probe(url, v="error", show_entries="format=duration", headers=headers, timeout=30_000_000)
-        return int(float(probe["format"]["duration"]))
+        return ffmpeg.probe(
+            url,
+            v="error",
+            show_entries="stream=codec_type,codec_name,width,height,pix_fmt:format=duration,size",
+            headers=headers,
+            timeout=30_000_000,
+        )
     except Exception as e:
-        log.warning("could not read the duration of %s: %s", fmt.get("format_id"), e)
+        log.warning("ffprobe of format %s failed: %s", fmt.get("format_id"), e)
+        return {}
+
+
+def _url_duration(fmt: dict[str, Any]) -> int:
+    """Instagram gives no duration in the probe, for carousel items and single
+    reels alike (2026-09-27). 0 when unknown."""
+    try:
+        return int(float(_probe_url(fmt)["format"]["duration"]))
+    except (KeyError, TypeError, ValueError):
         return 0
+
+
+def _ready_info(fmt: dict[str, Any]) -> tuple[int, int | None] | None:
+    """(short side, size) if `fmt` is a ready file -- mp4, h264, 4:2:0, with sound,
+    playable everywhere as downloaded -- else None. yt-dlp's own metadata is used
+    when complete (TikTok); otherwise the URL is probed (Instagram's `1/2/3`)."""
+    if fmt.get("ext") != "mp4" or "none" in (fmt.get("vcodec"), fmt.get("acodec")):
+        return None
+    vcodec, width, height = fmt.get("vcodec"), fmt.get("width"), fmt.get("height")
+    size = fmt.get("filesize") or fmt.get("filesize_approx")
+    pix_fmt = None
+    if not (vcodec and width and height and fmt.get("acodec")):
+        probe = _probe_url(fmt)
+        streams = probe.get("streams") or []
+        video = next((s for s in streams if s.get("codec_type") == "video"), None)
+        if video is None or not any(s.get("codec_type") == "audio" for s in streams):
+            return None
+        vcodec, width, height = video.get("codec_name"), video.get("width"), video.get("height")
+        pix_fmt = video.get("pix_fmt")
+        size = size or int((probe.get("format") or {}).get("size") or 0) or None
+    if not str(vcodec).startswith(("avc1", "h264")) or pix_fmt not in (None, "yuv420p"):
+        return None
+    if not (width and height):
+        return None
+    return min(width, height), size
+
+
+def _rung_of(short: int) -> int:
+    """The rung a ready file of this short side is judged at."""
+    return next((r for r in rungs() if short >= r), lowest_rung())
+
+
+def _ready_file(formats: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The ready file to send, by the order in the spec. Walked best-first (yt-dlp
+    lists formats worst first), so among equal short sides the best-ranked one
+    wins -- a bitrate bump over the old `worst` for TikTok -- and the walk stops at
+    the first ready file that fits, which usually means one ffprobe."""
+    top, lowest = rungs()[0], lowest_rung()
+    reaching: list[tuple[int, dict[str, Any]]] = []
+    below: list[tuple[int, dict[str, Any]]] = []
+    for fmt in reversed(formats):
+        info = _ready_info(fmt)
+        if info is None:
+            continue
+        short, size = info
+        if short > top:
+            continue  # would need a downscale, i.e. a re-encode
+        if short < lowest:
+            below.append((short, fmt))
+            continue
+        if fits(_rung_of(short), size):
+            return fmt
+        reaching.append((short, fmt))
+    if reaching:
+        # None fits its cap: the lightest of them as is, split after download if
+        # it is over the upload limit -- still no re-encode.
+        return min(reaching, key=lambda item: item[0])[1]
+    if below:
+        return max(below, key=lambda item: item[0])[1]
+    return None
+```
+
+- [ ] **Step 4: The merged ladder, for entries without a ready file**
+
+```python
+def _selector_ydl() -> yt_dlp.YoutubeDL:
+    """Compiles format selectors only -- no network."""
+    return yt_dlp.YoutubeDL(_SELECTOR_OPTS)
 
 
 def _select_format(ydl: yt_dlp.YoutubeDL, entry: dict[str, Any], rung: int) -> dict[str, Any] | None:
@@ -589,7 +676,8 @@ def _select_format(ydl: yt_dlp.YoutubeDL, entry: dict[str, Any], rung: int) -> d
 
 
 def _entry_rung(ydl: yt_dlp.YoutubeDL, entry: dict[str, Any]) -> int:
-    """The highest rung this entry reaches and fits in one file at its own cap."""
+    """The highest rung this entry reaches and fits in one file at its own cap,
+    for an entry with no ready file."""
     duration = int(entry.get("duration") or 0)
     for rung in rungs():
         fmt = _select_format(ydl, entry, rung)
@@ -610,14 +698,32 @@ def _entry_rung(ydl: yt_dlp.YoutubeDL, entry: dict[str, Any]) -> int:
         if fits(rung, estimate):
             return rung
     return lowest_rung()
+
+
+def _selector(rung: int) -> Callable[[dict[str, Any]], Iterator[dict[str, Any]]]:
+    """The download pass's format selector (yt-dlp accepts a callable `format`):
+    per entry, a ready file if there is one, else the chained merged ladder from
+    `rung` down. Deciding per entry inside the download pass itself is what keeps
+    the probe and the download from disagreeing about ready files."""
+    fallback = _selector_ydl().build_format_selector(_download_spec(rung))
+
+    def select(ctx: dict[str, Any]) -> Iterator[dict[str, Any]]:
+        ready = _ready_file(ctx.get("formats") or [])
+        if ready is not None:
+            yield ready
+            return
+        yield from fallback(ctx)
+
+    return select
 ```
 
-- [ ] **Step 4: `_download_positions` takes a rung and bounds the encode**
+- [ ] **Step 5: `_download_positions` takes the merger rung**
 
-Change the signature to `def _download_positions(url: str, positions: list[int], output_dir: Path, rung: int) -> dict[str, Path]:`, `opts = _base_opts(max_res)` to `opts = _base_opts(rung)`, and replace the comment + `postprocessor_args` block with:
+Change the signature to `def _download_positions(url: str, positions: list[int], output_dir: Path, rung: int) -> dict[str, Path]:`, replace `opts = _base_opts(max_res)` with `opts = _base_opts(_selector(rung))`, and replace the comment + `postprocessor_args` block with:
 
 ```python
-    # Re-encode to H.264/AAC with iOS-compatible settings:
+    # Only a merged download (no ready file) reaches the merger. Re-encode to
+    # H.264/AAC with iOS-compatible settings:
     # - yuv420p: iOS requires 8-bit 4:2:0 chroma
     # - faststart: moves moov atom to front so iOS can start playback immediately
     # - profile main: avoids B-frame issues on some decoders
@@ -643,32 +749,38 @@ Change the signature to `def _download_positions(url: str, positions: list[int],
     }
 ```
 
-- [ ] **Step 5: `download_social_video` picks the rung between the passes**
+- [ ] **Step 6: `download_social_video` -- the probe classifies, the merged entries set the rung**
 
 Change the signature to `def download_social_video(url: str, output_dir: Path) -> DownloadResult:`. Replace `probe_opts = _base_opts(max_res)` with:
 
 ```python
-    # The probe classifies with the lowest rung's loose selector -- exactly what
-    # it always did; the rung is chosen from its info below.
-    probe_opts = _base_opts(lowest_rung())
+    # A plain string spec for the probe: its own pick is never used (the decision
+    # below reads the formats), and a callable here would ffprobe every entry twice.
+    probe_opts = _base_opts(_download_spec(lowest_rung()))
 ```
 
-Replace the `if video_positions:` block's first line group so it reads:
+Replace the start of the `if video_positions:` block so it reads:
 
 ```python
     downloaded: dict[str, Path] = {}
     if video_positions:
-        # One yt-dlp call downloads every position with one set of options, so the
-        # post gets one rung: the lowest any of its videos needs.
+        # One yt-dlp call downloads every position with one set of merger options,
+        # so the post gets one merger rung: the lowest any entry WITHOUT a ready
+        # file needs. Ready files ignore it -- nothing re-encodes them.
         with _selector_ydl() as ydl:
-            rung = min(_entry_rung(ydl, entries[pos]) for pos in video_positions)
-        log.info("%s: %dp for %d video(s)", url, rung, len(video_positions))
+            merged_rungs = [
+                _entry_rung(ydl, entries[pos])
+                for pos in video_positions
+                if _ready_file(entries[pos].get("formats") or []) is None
+            ]
+        rung = min(merged_rungs, default=rungs()[0])
+        log.info("%s: %d ready, %d merged at %dp", url, len(video_positions) - len(merged_rungs), len(merged_rungs), rung)
         downloaded = _download_positions(url, video_positions, output_dir, rung)
 ```
 
 and in the retry line `downloaded.update(_download_positions(url, retry, output_dir, max_res))` replace `max_res` with `rung`.
 
-- [ ] **Step 6: Probe the three reference links (network, no download)**
+- [ ] **Step 7: Probe the reference links (network, no download)**
 
 Save as `/tmp/embedthat-ladder-baseline/t3.py`:
 
@@ -679,34 +791,41 @@ import yt_dlp
 
 from bot.util.social import download as D
 
-expected = {
-    "https://vkvideo.ru/video-164579181_456242552": 720,  # source tops out at 1280x720, 939 s, merged
-    "https://www.tiktok.com/@scout2015/video/6718335390845095173": 480,  # 720 is HEVC only -> h264 540p
-    "https://www.instagram.com/p/DdLlGOuGdlE/": 1080,  # merged item + silent VP9 items of unknown size
-}
 spec = D._download_spec(1080)
 assert spec.count("worstvideo") == 3 and spec.endswith("/best[ext=mp4]/best"), spec
 assert "/best" not in D._format_spec(720), D._format_spec(720)
 
+# per link: what each probed entry must resolve to -- ("ready", format-id prefixes) or ("ladder", rung)
+expected = {
+    "https://vkvideo.ru/video-164579181_456242552": [("ready", ("url720",))],
+    "https://www.tiktok.com/@scout2015/video/6718335390845095173": [("ready", ("h264_540p_",))],
+    "https://www.instagram.com/reel/DdwBDiPKh4a": [("ready", ("1", "2", "3"))],
+    # carousel: the item with sound is ready; the silent VP9 items take the ladder, as today
+    "https://www.instagram.com/p/DdLlGOuGdlE/": [("ready", ("1", "2", "3")), ("ladder", 1080), ("ladder", 1080)],
+}
 ok = True
 for url, want in expected.items():
-    with yt_dlp.YoutubeDL({**D._base_opts(D.lowest_rung()), "playlist_items": "1,2,3"}) as probe:
+    with yt_dlp.YoutubeDL({**D._base_opts(D._download_spec(D.lowest_rung())), "playlist_items": "1,2,3"}) as probe:
         info = probe.extract_info(url, download=False)
     entries = [e for e in D._entries_of(info) if e and e.get("formats")]
-    with D._selector_ydl() as ydl:  # the same selector instance production uses
-        got = min(D._entry_rung(ydl, e) for e in entries)
-        chosen = D._select_format(ydl, entries[0], got)
-    parts = (chosen or {}).get("requested_formats") or [chosen or {}]
-    print(url, "->", got, chosen and chosen.get("format_id"), chosen and chosen.get("vcodec"),
-          "duration", entries[0].get("duration") or D._url_duration(parts[0]))
-    ok &= got == want
+    got = []
+    with D._selector_ydl() as ydl:  # the same instance production uses
+        for e in entries:
+            ready = D._ready_file(e["formats"])
+            got.append(("ready", ready["format_id"]) if ready else ("ladder", D._entry_rung(ydl, e)))
+    match = len(got) == len(want) and all(
+        g[0] == w[0] and (g[1].startswith(w[1]) if w[0] == "ready" else g[1] == w[1])
+        for g, w in zip(got, want)
+    )
+    print("OK " if match else "BAD", url, got)
+    ok &= match
 sys.exit(0 if ok else 1)
 ```
 
 Run: `BOT_TOKEN=1:x DUMP_CHAT_ID=0 BOT_API_URL=http://x uv run --frozen python /tmp/embedthat-ladder-baseline/t3.py`
-Expected: VK -> 720 (an `hls_fmp4-*+dash_sep-*` pair, avc1, duration 939), TikTok -> 480 (`h264_540p_*`, not `bytevc1`), Instagram -> 1080 with a non-zero duration from ffprobe; exit 0. If Instagram answers with a login wall from this host, rerun that one link inside the dev worker in Task 5 instead and note it.
+Expected: four `OK` lines, exit 0. The TikTok id is the best-ranked `h264_540p_*` (a higher bitrate than today's `worst`), never `bytevc1_*`. If Instagram answers with a login wall from this host, rerun those two links inside the dev worker in Task 5 and note it.
 
-- [ ] **Step 7: The merger's scale expression on a portrait source, in the image**
+- [ ] **Step 8: The merger's scale expression on a portrait source, in the image**
 
 ```bash
 docker run --rm --entrypoint sh embedthat:dev -c 'ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=1080x1920:rate=1 -t 1 -vf "scale='"'"'if(gte(iw,ih),-2,min(720,iw))'"'"':'"'"'if(gte(iw,ih),min(720,ih),-2)'"'"'" -y /tmp/o.mp4 && ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 /tmp/o.mp4'
@@ -714,13 +833,13 @@ docker run --rm --entrypoint sh embedthat:dev -c 'ffmpeg -hide_banner -loglevel 
 
 Expected: `720,1280`. (If `embedthat:dev` is absent, use `metheoryt/embedthat:latest`.)
 
-- [ ] **Step 8: Gate, commit, push**
+- [ ] **Step 9: Gate, commit, push**
 
 Run: `bash /tmp/embedthat-ladder-baseline/gate.sh` -- no NEW findings.
 
 ```bash
 git add bot/util/social/download.py
-git commit -m "social: strict per-rung selector, rung chosen before download, bounded veryfast encode
+git commit -m "social: a ready h264 file first, the merged ladder as the fallback
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 git push
@@ -848,11 +967,11 @@ Expected: `logOut: True` (or an error saying it is already logged out -- fine); 
 Ask the user to send, one at a time, and after each run
 `docker compose logs --since 10m worker | grep -E "rung|selected|skipped|merging|dump chat|split|p for|TimeLimit|retrying"`:
 
-1. A portrait Instagram reel -> one file, width 1080 (or the reel's own width if lower); the log shows `1080p` for it.
-2. The VK video `https://vkvideo.ru/video-164579181_456242552` -> one file at 1280x720, `720p for 1 video(s)`; record the job's wall time (must be well under 45 min).
+1. A portrait Instagram reel -> one file at 720x1280, `1 ready, 0 merged`, no `libx264` anywhere in the job's log.
+2. The VK video `https://vkvideo.ru/video-164579181_456242552` -> one file at 1280x720 (~219 MB), `1 ready, 0 merged`, no `libx264`; record the job's wall time (download + upload only now).
 3. A YouTube video of 45-90 min -> the log shows `1080p: ...Mb estimated, over its cap -- skipped without download` and `selected 720p`; one file. **Record the upload wall time** (from `sending 1 part(s) to dump chat` to the next line): the 2026-09-26 rehearsal pushed ~140 MB in 13 s (~10 MB/s), which puts 2 GB at ~3.5 min against the 30-min `UPLOAD_TIMEOUT` in `bot/util/tg.py`; a much slower number here is a finding to raise before release.
 4. A short YouTube video -> `selected 1080p`, `(copy)` in the merge line, no `libx264`.
-5. A TikTok -> `480p`, delivered, plays on the user's phone.
+5. A TikTok -> `1 ready`, an `h264_540p_*` file, delivered, plays on the user's phone.
 
 For each, record size and resolution of what arrived (`docker compose logs` merge/size lines, or the user reading it off the message).
 
@@ -867,9 +986,12 @@ Add a `## Rehearsal (2026-09-27)` section to the spec with the five results and 
   lower. A rung the source does not reach is skipped; only the lowest rung falls
   back to a smaller source. Per-rung caps: 1080 <= 1000 MB, 720 <= 1500 MB,
   480 <= 2000 MB; split only at 480.
-- On the social path the yt-dlp selector must stay **strict** above the lowest
-  rung: its loose `/best` tail catches any source below the rung and sends it
-  un-re-encoded (the VK video tops out at 720; TikTok serves HEVC at 720p).
+- The social path sends a **ready file** (mp4, h264, 4:2:0, with sound) as
+  downloaded whenever one exists -- Instagram reels at 720 via formats `1/2/3`,
+  which yt-dlp reports without codec or size (read by ffprobe from the URL), VK
+  via `url720`. Only entries without one are merged and re-encoded, and there the
+  yt-dlp selector must stay **strict** above the lowest rung: its loose `/best`
+  tail catches any source below the rung and sends it un-re-encoded.
 ```
 
 - [ ] **Step 6: Commit, push**

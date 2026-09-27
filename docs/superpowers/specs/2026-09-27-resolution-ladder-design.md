@@ -2,7 +2,8 @@
 
 **Date:** 2026-09-27
 **Status:** design, approved in chat 2026-09-27; amended after review (strict
-per-rung selectors, `veryfast`, waiter TTL) and with per-rung size caps
+per-rung selectors, `veryfast`, waiter TTL), with per-rung size caps, and with
+ready files first on the social path
 
 ## Goal
 
@@ -110,6 +111,33 @@ One small module holds what both paths use, so the rule lives in one place:
 
 ## Social path (`bot/util/social/download.py`, `bot/worker/pipeline.py`)
 
+**A ready file first (agreed 2026-09-27).** Short clips -- TikToks, Instagram
+reels -- are not re-encoded; the ladder is for long videos. So per video entry:
+
+1. A **ready file** -- mp4, h264, 4:2:0, with sound, playable everywhere as
+   downloaded -- is sent as is. The highest one whose short side is between the
+   lowest and the top rung and whose size fits its own rung's cap; if ready files
+   reaching the lowest rung exist but none fits, the lowest of them, as is (split
+   after download if it is over the upload limit); a ready file below the lowest
+   rung only when nothing reaches it. Never above the top rung (that would need a
+   downscale, i.e. a re-encode).
+2. **No ready file** (DASH-only sites; silent Instagram carousel items, which
+   have no sound): the merged ladder below.
+
+Measured 2026-09-27, all fast-start (`moov` before `mdat`), so no remux is needed:
+VK `url720` is h264 High 1280x720 yuv420p + AAC (219 MB, 939 s -- the video that
+used to be split now goes as is); Instagram reel formats `1/2/3` are h264 720x1280
+yuv420p + AAC, reported by yt-dlp with no codec, size or dimensions, so they are
+read by ffprobe from their URL (~0.6 s, best-first, stopping at the first that
+fits). Consequences, accepted: **Instagram reels go at 720** (their 1080 exists
+only as VP9 DASH, which would need the re-encode); TikTok stays at its h264 540p,
+now the best-ranked bitrate rather than `worst`.
+
+The ready choice is made per entry inside the download pass itself (yt-dlp takes
+a callable `format`), so the probe and the download cannot disagree about it.
+
+### Fallback: the merged ladder (entries without a ready file)
+
 **Rung = strict selector.** Today's selector ends in `/best[ext=mp4]/best`, a
 fallback with no resolution filter and no merge. At 480 almost everything
 matches the first alternative, so it rarely fires; at 1080 it would catch every
@@ -216,11 +244,10 @@ the old key, and that user gets silence.
 No test suite (`.claude/memory/project.md`, "Verification"). On the dev stack
 with the local `telegram-bot-api` and the debug bot:
 
-1. A portrait Instagram reel arrives at its native short side (1080 wide), not
-   270x480 or 608x1080.
-2. The 939-second VK video from 2026-09-26 (source tops out at 720) arrives as
-   one merged, re-encoded file at 1280x720 -- not a pre-muxed file picked by the
-   loose fallback -- within the time limit.
+1. A portrait Instagram reel arrives as its ready file, 720x1280, with no
+   re-encode (no `libx264` in the log).
+2. The 939-second VK video from 2026-09-26 arrives as its ready `url720` file,
+   1280x720, ~219 MB, one file, no re-encode.
 3. A YouTube video of ~45-90 min, whose 1080 stream does not fit in 1000 MB
    but whose 720 fits in 1500 MB, arrives as one
    file at 720; the worker log shows 1080 skipped **without** a download.
