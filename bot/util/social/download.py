@@ -1,14 +1,18 @@
 import logging
+import math
 import shutil
 import urllib.request
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 import ffmpeg
+import yt_dlp
 
 from bot.config import settings
+from bot.util.ladder import fits, lowest_rung, rungs, scale_expression
 from bot.util.ytdlp import extract_info
 
 from .exc import SocialDownloadError
@@ -16,6 +20,22 @@ from .exc import SocialDownloadError
 log = logging.getLogger(__name__)
 
 _PHOTO_FETCH_TIMEOUT = 30
+
+# Fallback only (no ready file): the merger always re-encodes, so the source size
+# says nothing about the output. A per-rung bitrate ceiling does: duration x
+# (ceiling + audio) bounds the file before a byte is downloaded.
+_ENCODE_MAXRATE_KBPS = {1080: 6000, 720: 3000, 480: 1500}
+_ENCODE_AUDIO_KBPS = 128
+# Encoding time, not size, is what binds a merged download: measured 2026-09-27
+# on latitude, x264 veryfast on real footage runs ~32 fps at 1080p and ~72 at
+# 720p, under an actor limit of 45 min. The lowest rung has no ceiling.
+_ENCODE_MAX_DURATION = {1080: 10 * 60, 720: 30 * 60}
+# A single file is sent as downloaded, never re-encoded -- and HEVC does not
+# play in every Telegram client (TikTok serves bytevc1 at 720p, 2026-09-27).
+_NO_HEVC = "[vcodec!~='^(h265|hevc|hev1|hvc1|bytevc1)']"
+# The options the fallback selector is compiled with: a merged pick's `ext`
+# comes from the compiling instance's `merge_output_format`.
+_SELECTOR_OPTS: dict[str, Any] = {"quiet": True, "merge_output_format": "mp4"}
 
 
 def _probe_dimensions(file_path: Path) -> tuple[int, int]:
@@ -181,12 +201,34 @@ def _media_file(
     return MediaFile(file_path=photo_path, kind="photo", width=width, height=height, duration=0)
 
 
-def _base_opts(max_res: int) -> dict[str, Any]:
+def _format_spec(rung: int) -> str:
+    """Strict: a rung the source does not reach selects nothing, so the caller
+    moves down a rung. Only the lowest rung keeps the old loose tail -- at a
+    higher one it would catch every source below the rung and send it
+    un-re-encoded. Short side >= rung means both sides >= rung; every video
+    format with a codec probed on Instagram, VK and TikTok carried a width
+    (2026-09-27), so no `>=?`."""
+    fit = f"[height>={rung}][width>={rung}]"
+    spec = f"worstvideo[ext=mp4]{fit}+bestaudio[ext=m4a]/worst[ext=mp4]{fit}{_NO_HEVC}"
+    if rung == lowest_rung():
+        spec += "/best[ext=mp4]/best"
+    return spec
+
+
+def _download_spec(rung: int) -> str:
+    """The fallback the download pass asks for: the chosen rung, then every rung
+    below it, ending in the lowest rung's loose tail. The download is a second
+    extraction (with the cookie jar, if the site walled the anonymous one) and may
+    see other formats than the probe; the worst case is then a lower rung, never
+    "Requested format is not available". Safe for size and time: a lower source
+    is smaller than the chosen rung's bound, and the scale expression only
+    shrinks."""
+    return "/".join(_format_spec(r) for r in rungs() if r <= rung)
+
+
+def _base_opts(fmt: str | Callable[[dict[str, Any]], Iterator[dict[str, Any]]]) -> dict[str, Any]:
     return {
-        "format": (
-            f"worstvideo[ext=mp4][height>={max_res}]+bestaudio[ext=m4a]/"
-            f"worst[ext=mp4][height>={max_res}]/best[ext=mp4]/best"
-        ),
+        "format": fmt,
         "merge_output_format": "mp4",
         "quiet": True,
         # `noplaylist` is deliberately absent. A carousel URL *is* the playlist, so
@@ -203,7 +245,158 @@ def _entries_of(info: dict[str, Any]) -> list[dict[str, Any] | None]:
     return [info]
 
 
-def _download_positions(url: str, positions: list[int], output_dir: Path, max_res: int) -> dict[str, Path]:
+def _probe_url(fmt: dict[str, Any]) -> dict[str, Any]:
+    """ffprobe of a format's URL -- the header only, ~0.6 s. {} when it fails."""
+    url = fmt.get("url")
+    if not url:
+        return {}
+    http_headers = cast(dict[str, str], fmt.get("http_headers") or {})
+    headers = "".join(f"{k}: {v}\r\n" for k, v in http_headers.items())
+    try:
+        # kwargs become ffprobe flags; -timeout is ffprobe's HTTP timeout, in microseconds
+        return cast(dict[str, Any], ffmpeg.probe(  # pyright: ignore[reportUnknownMemberType]
+            url,
+            v="error",
+            show_entries="stream=codec_type,codec_name,width,height,pix_fmt:format=duration,size",
+            headers=headers,
+            timeout=30_000_000,
+        ))
+    except Exception as e:
+        log.warning("ffprobe of format %s failed: %s", fmt.get("format_id"), e)
+        return {}
+
+
+def _url_duration(fmt: dict[str, Any]) -> int:
+    """Instagram gives no duration in the probe, for carousel items and single
+    reels alike (2026-09-27). 0 when unknown."""
+    try:
+        return int(float(_probe_url(fmt)["format"]["duration"]))
+    except (KeyError, TypeError, ValueError):
+        return 0
+
+
+def _ready_info(fmt: dict[str, Any]) -> tuple[int, int | None] | None:
+    """(short side, size) if `fmt` is a ready file -- mp4, h264, 4:2:0, with sound,
+    playable everywhere as downloaded -- else None. yt-dlp's own metadata is used
+    when complete (TikTok); otherwise the URL is probed (Instagram's `1/2/3`)."""
+    if fmt.get("ext") != "mp4" or "none" in (fmt.get("vcodec"), fmt.get("acodec")):
+        return None
+    vcodec, width, height = fmt.get("vcodec"), fmt.get("width"), fmt.get("height")
+    size = fmt.get("filesize") or fmt.get("filesize_approx")
+    pix_fmt = None
+    if not (vcodec and width and height and fmt.get("acodec")):
+        probe = _probe_url(fmt)
+        streams = cast(list[dict[str, Any]], probe.get("streams") or [])
+        video = next((s for s in streams if s.get("codec_type") == "video"), None)
+        if video is None or not any(s.get("codec_type") == "audio" for s in streams):
+            return None
+        vcodec, width, height = video.get("codec_name"), video.get("width"), video.get("height")
+        pix_fmt = video.get("pix_fmt")
+        container = cast(dict[str, Any], probe.get("format") or {})
+        size = size or int(container.get("size") or 0) or None
+    if not str(vcodec).startswith(("avc1", "h264")) or pix_fmt not in (None, "yuv420p"):
+        return None
+    if not (width and height):
+        return None
+    return min(width, height), size
+
+
+def _rung_of(short: int) -> int:
+    """The rung a ready file of this short side is judged at."""
+    return next((r for r in rungs() if short >= r), lowest_rung())
+
+
+def _ready_file(formats: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The ready file to send, by the order in the spec. Walked best-first (yt-dlp
+    lists formats worst first), so among equal short sides the best-ranked one
+    wins -- a bitrate bump over the old `worst` for TikTok -- and the walk stops at
+    the first ready file that fits, which usually means one ffprobe."""
+    top, lowest = rungs()[0], lowest_rung()
+    reaching: list[tuple[int, dict[str, Any]]] = []
+    below: list[tuple[int, dict[str, Any]]] = []
+    for fmt in reversed(formats):
+        info = _ready_info(fmt)
+        if info is None:
+            continue
+        short, size = info
+        if short > top:
+            continue  # would need a downscale, i.e. a re-encode
+        if short < lowest:
+            below.append((short, fmt))
+            continue
+        if fits(_rung_of(short), size):
+            return fmt
+        reaching.append((short, fmt))
+    if reaching:
+        # None fits its cap: the lightest of them as is, split after download if
+        # it is over the upload limit -- still no re-encode.
+        return min(reaching, key=lambda item: item[0])[1]
+    if below:
+        return max(below, key=lambda item: item[0])[1]
+    return None
+
+
+def _selector_ydl() -> yt_dlp.YoutubeDL:
+    """Compiles format selectors only -- no network."""
+    return yt_dlp.YoutubeDL(cast(Any, _SELECTOR_OPTS))
+
+
+def _select_format(ydl: yt_dlp.YoutubeDL, entry: dict[str, Any], rung: int) -> dict[str, Any] | None:
+    """What yt-dlp would download for `entry` at `rung`, from the probe's info --
+    no second extraction. The ctx mirrors YoutubeDL.process_video_result."""
+    formats = cast(list[dict[str, Any]], entry.get("formats") or [])
+    ctx: dict[str, Any] = {
+        "formats": formats,
+        "has_merged_format": any("none" not in (f.get("acodec"), f.get("vcodec")) for f in formats),
+        "incomplete_formats": all(f.get("vcodec") == "none" for f in formats)
+        or all(f.get("acodec") == "none" for f in formats),
+    }
+    return next(iter(ydl.build_format_selector(_format_spec(rung))(ctx)), None)
+
+
+def _entry_rung(ydl: yt_dlp.YoutubeDL, entry: dict[str, Any]) -> int:
+    """The highest rung this entry reaches and fits in one file at its own cap,
+    for an entry with no ready file."""
+    duration = int(entry.get("duration") or 0)
+    for rung in rungs():
+        fmt = _select_format(ydl, entry, rung)
+        if fmt is None:
+            continue  # the source does not reach this rung
+        if fmt.get("requested_formats"):  # merged, so re-encoded
+            if not duration:
+                duration = _url_duration(fmt["requested_formats"][0])
+            ceiling = _ENCODE_MAX_DURATION.get(rung, math.inf)
+            # Unknown length: only a rung without a ceiling -- encoding time is
+            # the one limit that kills the job instead of splitting it.
+            if duration > ceiling or (not duration and ceiling != math.inf):
+                continue
+            kbps = _ENCODE_MAXRATE_KBPS[rung] + _ENCODE_AUDIO_KBPS
+            estimate = int(duration * kbps * 1000 / 8) if duration else None
+        else:  # one file, sent as downloaded
+            estimate = fmt.get("filesize") or fmt.get("filesize_approx")
+        if fits(rung, estimate):
+            return rung
+    return lowest_rung()
+
+
+def _selector(rung: int) -> Callable[[dict[str, Any]], Iterator[dict[str, Any]]]:
+    """The download pass's format selector (yt-dlp accepts a callable `format`):
+    per entry, a ready file if there is one, else the chained merged ladder from
+    `rung` down. Deciding per entry inside the download pass itself is what keeps
+    the probe and the download from disagreeing about ready files."""
+    fallback = _selector_ydl().build_format_selector(_download_spec(rung))
+
+    def select(ctx: dict[str, Any]) -> Iterator[dict[str, Any]]:
+        ready = _ready_file(ctx.get("formats") or [])
+        if ready is not None:
+            yield ready
+            return
+        yield from fallback(ctx)
+
+    return select
+
+
+def _download_positions(url: str, positions: list[int], output_dir: Path, rung: int) -> dict[str, Path]:
     """Downloads the given 1-based playlist positions, returning entry id -> file.
 
     `ignoreerrors="only_download"` is what makes a carousel survive one bad item:
@@ -214,22 +407,32 @@ def _download_positions(url: str, positions: list[int], output_dir: Path, max_re
     Nothing is inferred from what comes back: files are matched to entries by id,
     so a missing position stays missing instead of being filled by its neighbour.
     """
-    opts = _base_opts(max_res)
+    opts = _base_opts(_selector(rung))
     opts["outtmpl"] = str(output_dir / "%(id)s.%(ext)s")
     opts["playlist_items"] = ",".join(str(pos) for pos in positions)
     opts["ignoreerrors"] = "only_download"
-    # Re-encode to H.264/AAC with iOS-compatible settings:
+    # Only a merged download (no ready file) reaches the merger. Re-encode to
+    # H.264/AAC with iOS-compatible settings:
     # - yuv420p: iOS requires 8-bit 4:2:0 chroma
     # - faststart: moves moov atom to front so iOS can start playback immediately
     # - profile main: avoids B-frame issues on some decoders
-    # - scale: this merger step is already a mandatory re-encode, so capping height here is free
+    # - scale: this merger step is already a mandatory re-encode, so the short-side
+    #   cap is free
+    # - veryfast + maxrate: ~2x the speed of the default preset and a size known
+    #   before download (a smaller file than `medium` under the same ceiling,
+    #   measured 2026-09-27); audio pinned so it enters the estimate as a constant
+    maxrate = _ENCODE_MAXRATE_KBPS[rung]
     opts["postprocessor_args"] = {
         "merger": [
             "-vcodec", "libx264",
+            "-preset", "veryfast",
             "-profile:v", "main",
             "-pix_fmt", "yuv420p",
-            "-vf", f"scale=-2:'min({max_res},ih)'",
+            "-maxrate", f"{maxrate}k",
+            "-bufsize", f"{2 * maxrate}k",
+            "-vf", scale_expression(rung),
             "-acodec", "aac",
+            "-b:a", f"{_ENCODE_AUDIO_KBPS}k",
             "-movflags", "+faststart",
         ],
     }
@@ -247,7 +450,7 @@ def _download_positions(url: str, positions: list[int], output_dir: Path, max_re
     return found
 
 
-def download_social_video(url: str, output_dir: Path, max_res: int = settings.max_video_resolution) -> DownloadResult:
+def download_social_video(url: str, output_dir: Path) -> DownloadResult:
     """
     Synchronous yt-dlp download. Call via asyncio.to_thread in the handler.
 
@@ -267,7 +470,9 @@ def download_social_video(url: str, output_dir: Path, max_res: int = settings.ma
     TransientDownloadError for the ones worth another attempt (429/5xx/timeouts).
     """
     index = carousel_index(url)
-    probe_opts = _base_opts(max_res)
+    # A plain string spec for the probe: its own pick is never used (the decision
+    # below reads the formats), and a callable here would ffprobe every entry twice.
+    probe_opts = _base_opts(_download_spec(lowest_rung()))
     if index is not None:
         probe_opts["playlist_items"] = str(index)
 
@@ -287,7 +492,19 @@ def download_social_video(url: str, output_dir: Path, max_res: int = settings.ma
 
     downloaded: dict[str, Path] = {}
     if video_positions:
-        downloaded = _download_positions(url, video_positions, output_dir, max_res)
+        # One yt-dlp call downloads every position with one set of merger options,
+        # so the post gets one merger rung: the lowest any entry WITHOUT a ready
+        # file needs. Ready files ignore it -- nothing re-encodes them.
+        with _selector_ydl() as ydl:
+            merged_rungs = [
+                _entry_rung(ydl, entries[pos])
+                for pos in video_positions
+                if _ready_file(entries[pos].get("formats") or []) is None
+            ]
+        rung = min(merged_rungs, default=rungs()[0])
+        log.info("%s: %d ready, %d merged at %dp",
+                 url, len(video_positions) - len(merged_rungs), len(merged_rungs), rung)
+        downloaded = _download_positions(url, video_positions, output_dir, rung)
         retry = [pos for pos in video_positions if (entries[pos].get("id") or "") not in downloaded]
         if retry:
             # One narrow second attempt, for the failed positions only. A 403 on a
@@ -295,7 +512,7 @@ def download_social_video(url: str, output_dir: Path, max_res: int = settings.ma
             # and asking for just those costs a fraction of redoing the post --
             # which is what raising here would make dramatiq do.
             log.warning("retrying %d failed position(s) of %s: %s", len(retry), url, retry)
-            downloaded.update(_download_positions(url, retry, output_dir, max_res))
+            downloaded.update(_download_positions(url, retry, output_dir, rung))
 
     files: list[MediaFile] = []
     missing: list[int] = []
