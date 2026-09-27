@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-27
 **Status:** design, approved in chat 2026-09-27; amended after review (strict
-per-rung selectors, `veryfast`, waiter TTL)
+per-rung selectors, `veryfast`, waiter TTL) and with per-rung size caps
 
 ## Goal
 
@@ -33,10 +33,32 @@ Rungs, highest first: **1080, 720, 480**. A rung is measured by the **short
 side** of the frame, not the height: a portrait 1080x1920 is a 1080 rung, and
 must not be scaled to 270x480 or 608x1080.
 
-Pick the highest rung whose **estimated** size fits the upload limit in one file
-(and, on the social path, whose re-encode fits the time budget below). Estimates
-are made before downloading; only the chosen rung is downloaded. If no rung fits
-in one file, take 480 and split it, exactly as today.
+Each rung has its own size cap -- the "golden middle" agreed 2026-09-27: a long
+video should drop to a lighter rung well before it hits the hard limit, because a
+2 GB file is slow to upload, slow to fetch on a phone and heavy on the server's
+disk.
+
+| rung | cap per file |
+|------|--------------|
+| 1080 | 1000 MB      |
+| 720  | 1500 MB      |
+| 480  | 2000 MB (the upload limit) |
+
+Each cap is clipped to `Settings.max_upload_size_bytes`, so on the cloud server
+(50 MB) all three collapse to 50 MB and the rule still works after a rollback.
+The caps live in code next to `RUNGS`, not in settings.
+
+Pick the highest rung whose **estimated** size fits **its own cap** in one file
+(and, on the social path, whose re-encode fits the time budget below). A rung the
+source does not reach (short side below it) is skipped, not substituted with a
+lower stream: that stream is judged at its own rung, against its own cap.
+Estimates are made before downloading; only the chosen rung is downloaded. If no
+rung fits, take 480 and split it against the upload limit, exactly as today.
+
+**Splitting stays at 480** (asked and settled 2026-09-27). A split happens only
+when 480 does not fit in 2 GB, i.e. for videos over ~4 hours; there 720 would be
+5+ GB and 1080 10+ GB to download, merge and upload inside the 45-minute actor
+limit, and nobody watches a 4-hour video in ten 2 GB parts.
 
 After download the real size is checked again as a safety net. A miss goes to
 the existing split, never to a second download or a second encode.
@@ -48,9 +70,11 @@ One small module holds what both paths use, so the rule lives in one place:
 - `RUNGS = (1080, 720, 480)` and the top rung from `Settings.max_video_resolution`
   (default raised from 480 to 1080; prod sets no override -- checked 2026-09-27).
   A rung above the setting is dropped, so the setting still works as a ceiling.
-- `choose_rung(candidates, limit) -> (rung, needs_split)`: given, per rung, an
+- `RUNG_CAPS` (the table above) and `rung_cap(rung) -> int`, clipped to the
+  upload limit.
+- `choose_rung(candidates) -> (rung, needs_split)`: given, per available rung, an
   estimated size (and on the social path a yes/no from the time budget), returns
-  the highest rung that fits in one file, else `(480, True)`. Pure function; the
+  the highest rung whose estimate fits its cap, else `(480, True)`. Pure function; the
   paths feed it their own estimates.
 - `scale_filter(width, height, rung) -> str | None`: the ffmpeg `-vf` value that
   brings the short side down to `rung`, keeping the aspect (`scale=-2:R` for
@@ -65,16 +89,17 @@ One small module holds what both paths use, so the rule lives in one place:
   `pick_stream`, which is fine only because that runs once; the restructure must
   keep it that way.
 - For each rung: the candidate is the smallest avc1 stream whose real short side
-  is >= the rung (re-encoded down with `scale_filter`), else the best stream
-  below the rung (copied). Rungs that resolve to the same stream are one
-  candidate. Real resolution keeps coming from `get_resolution` (streams that lie
+  is >= the rung -- copied when it equals the rung, re-encoded down with
+  `scale_filter` when above. No such stream = the rung is skipped. Only the 480
+  rung falls back to the best stream below it (copied), so a 360p-only video
+  still downloads as today. Real resolution keeps coming from `get_resolution` (streams that lie
   about their resolution are still filtered out), sorted by short side.
-- Estimate = `stream.filesize` + audio size, against `max_upload_size_bytes * 0.98`
-  -- the check `pick_stream` already makes before downloading. The loop order is
+- Estimate = `stream.filesize` + audio size, against `rung_cap(rung) * 0.98` --
+  the check `pick_stream` already makes before downloading, now per rung. The loop order is
   what changes: **rungs outer, one part each**; only the 480 rung may take 2..10
   parts. Today `n_parts` is the outer loop and `tier1 or tier2` discards every
   lower native stream, which is exactly the "split at 1080" bug.
-- A rung that downloads and merges but comes out over the limit (only possible
+- A rung that downloads and merges but comes out over its cap (only possible
   when it was re-encoded -- YouTube serves avc1 up to 1080p, so this is rare)
   has its files deleted before the next rung is tried.
 - `check_download_adaptive`'s split-until-parts-fit loop is unchanged.
@@ -103,11 +128,11 @@ which kind of download it is:
   the source size says nothing about the output. The encode gets a per-rung
   bitrate ceiling, which makes the output size known in advance:
 
-  | rung | `-maxrate` | `-bufsize` | fits 2000 MB up to |
+  | rung | `-maxrate` | `-bufsize` | fits its cap up to |
   |------|-----------|-----------|--------------------|
-  | 1080 | 6 Mbit/s  | 12M       | ~43 min            |
-  | 720  | 3 Mbit/s  | 6M        | ~83 min            |
-  | 480  | 1.5 Mbit/s| 3M        | ~2.7 h             |
+  | 1080 | 6 Mbit/s  | 12M       | ~21 min (1000 MB)  |
+  | 720  | 3 Mbit/s  | 6M        | ~63 min (1500 MB)  |
+  | 480  | 1.5 Mbit/s| 3M        | ~2.7 h (2000 MB)   |
 
   Audio is pinned to `-b:a 128k` so it enters the estimate as a constant.
   Estimate = duration x (maxrate + 128 kbit/s). CRF stays at the x264 default;
@@ -173,7 +198,8 @@ with the local `telegram-bot-api` and the debug bot:
 2. The 939-second VK video from 2026-09-26 (source tops out at 720) arrives as
    one merged, re-encoded file at 1280x720 -- not a pre-muxed file picked by the
    loose fallback -- within the time limit.
-3. A long YouTube video whose 1080 stream does not fit in 2000 MB arrives as one
+3. A YouTube video of ~45-90 min, whose 1080 stream does not fit in 1000 MB
+   but whose 720 fits in 1500 MB, arrives as one
    file at 720; the worker log shows 1080 skipped **without** a download.
 4. A short YouTube video arrives at 1080, copied (no `libx264` in the log).
 5. `choose_rung` and `scale_filter` checked in isolation with a few inputs
