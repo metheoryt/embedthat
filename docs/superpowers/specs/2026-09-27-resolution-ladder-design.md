@@ -67,15 +67,19 @@ the existing split, never to a second download or a second encode.
 
 One small module holds what both paths use, so the rule lives in one place:
 
-- `RUNGS = (1080, 720, 480)` and the top rung from `Settings.max_video_resolution`
+`bot/util/ladder.py`:
+
+- `RUNG_CAPS_MB = {1080: 1000, 720: 1500, 480: 2000}` and the top rung from `Settings.max_video_resolution`
   (default raised from 480 to 1080; prod sets no override -- checked 2026-09-27).
   A rung above the setting is dropped, so the setting still works as a ceiling.
-- `RUNG_CAPS` (the table above) and `rung_cap(rung) -> int`, clipped to the
-  upload limit.
-- `choose_rung(candidates) -> (rung, needs_split)`: given, per available rung, an
-  estimated size (and on the social path a yes/no from the time budget), returns
-  the highest rung whose estimate fits its cap, else `(480, True)`. Pure function; the
-  paths feed it their own estimates.
+- `rung_cap(rung) -> int`, clipped to the upload limit, and
+  `fits(rung, size | None) -> bool` (an unknown size fits; the post-download check
+  decides). Planning replaced a single `choose_rung` with this pair: the YouTube
+  loop has to act between rungs (merge, re-check, move on), so the order and the
+  caps are shared and each path walks the rungs itself.
+- `rung_candidates(dims) -> [(rung, source)]`: per rung, the smallest source
+  whose short side reaches it; unreached rungs skipped; only the lowest rung
+  falls back to the best source below it. Used by the YouTube path.
 - `scale_filter(width, height, rung) -> str | None`: the ffmpeg `-vf` value that
   brings the short side down to `rung`, keeping the aspect (`scale=-2:R` for
   landscape, `scale=R:-2` for portrait), or `None` when the short side is already
@@ -115,7 +119,10 @@ both `>=1080` alternatives and take a pre-muxed file with no re-encode -- no
 yuv420p, no main profile, no bitrate ceiling. So each rung gets a strict
 selector with no loose tail:
 
-- rung R (1080, 720): `worstvideo[ext=mp4][height>=R][width>=R]+bestaudio[ext=m4a]/worst[ext=mp4][height>=R][width>=R]`
+- rung R (1080, 720): `worstvideo[ext=mp4][height>=R][width>=R]+bestaudio[ext=m4a]/worst[ext=mp4][height>=R][width>=R][vcodec!~='^(h265|hevc|hev1|hvc1|bytevc1)']`
+  -- the single-file alternative excludes HEVC because nothing re-encodes it:
+  TikTok serves its 720p only as `bytevc1` (probed 2026-09-27), so a TikTok stays
+  at its h264 540p, as today.
 - rung 480: the same, followed by today's loose tail `/best[ext=mp4]/best`, so a
   source below 480 still downloads as it does today.
 
@@ -172,9 +179,14 @@ actor limit below is for that, and for the download and the upload.
 - **Carousels:** one yt-dlp call downloads all positions with one set of
   options, so the whole batch gets one rung -- the lowest any item needs.
   Carousel items are short, so in practice that is 1080 or the source's own best.
-- **Short side in yt-dlp:** `[height>=R][width>=R]` above. Whether a format with
-  missing width should pass (`>=?`) is checked against a real Instagram and VK
-  probe in the plan, not assumed. The merger's `scale=-2:'min(R,ih)'` becomes the
+- **Short side in yt-dlp:** `[height>=R][width>=R]` above, without `>=?`: every
+  video format probed on Instagram, VK and TikTok carried a width (2026-09-27);
+  the formats without one (Instagram's `0..3`, VK's `url720`) carry no codec or
+  height either and were already excluded by today's `[height>=480]`.
+- **Known, unchanged:** silent Instagram carousel items are VP9 video-only
+  single files -- no merge, so no re-encode -- exactly as at 480 today, now at
+  their 1080. Instagram carousel entries carry no duration in the probe, so their
+  merged estimate is unknown and allowed. The merger's `scale=-2:'min(R,ih)'` becomes the
   short-side expression, verified with one ffmpeg run on a portrait clip.
 - `_split_oversized` stays as the fallback after download.
 
