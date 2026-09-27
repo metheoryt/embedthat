@@ -67,7 +67,10 @@ class Settings(BaseSettings):
         # parts; its own keys make it fetch each video once, whole, and leave the
         # cloud's entries intact for a rollback. Audio keys stay shared: nothing was
         # split there, and cloud file ids work on the local server (2026-09-26).
-        return "l" if self.bot_api_url else ""
+        # `l2` since the resolution ladder (2026-09-27): every `ytl:`/`dl2l:` entry
+        # was cached at 480p or split, and is fetched again at the new rungs. The
+        # old keys are deleted once by hand after the deploy (no key has a TTL).
+        return "l2" if self.bot_api_url else ""
 
     def now(self) -> datetime:
         return datetime.now(self.timezone)

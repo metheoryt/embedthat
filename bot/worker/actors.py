@@ -434,7 +434,7 @@ async def _process_social_link_async(bot: Bot, chat_id: int, url: str) -> None:
     max_retries=_SOCIAL_MAX_RETRIES,
     min_backoff=30_000,
     max_backoff=5 * 60_000,
-    time_limit=25 * 60_000,
+    time_limit=45 * 60_000,  # a merged 1080/720 re-encode of up to 10/30 min (bot/util/social/download.py)
     throws=(SocialDownloadError, AudioDownloadError),
     on_retry_exhausted="report_actor_failure",
 )

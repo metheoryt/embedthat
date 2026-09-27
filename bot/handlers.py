@@ -62,7 +62,7 @@ _NOT_MEDIA_HOST_RE = re.compile(
 )
 
 _YOUTUBE_WAITERS_TTL = 3 * 60 * 60  # generous vs. worst-case retry budget (~2.5h)
-_SOCIAL_WAITERS_TTL = 90 * 60  # ~1.5h
+_SOCIAL_WAITERS_TTL = 3 * 60 * 60  # vs. 3 attempts x 45 min + backoff (~2.5h), as YouTube
 
 
 @router.error()
