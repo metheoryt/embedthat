@@ -65,8 +65,16 @@ def rung_candidates[T](dims: Mapping[T, tuple[int, int]]) -> list[tuple[int, T]]
 
 
 def scale_filter(width: int, height: int, rung: int) -> str | None:
-    """`-vf` value bringing the short side down to `rung`, or None if it is already there."""
-    if min(width, height) <= rung:
+    """`-vf` value bringing the short side down to `rung`, or None to copy.
+
+    A source between `rung` and the rung above is copied, not scaled: a
+    letterboxed film is served as 1920x800 for "1080p", and scaling it to 720
+    would re-encode a two-hour film for a few pixels. It is judged at this rung's
+    cap all the same. Only a source that reaches the rung above -- one whose own
+    tier is missing or over its cap -- is scaled down."""
+    short = min(width, height)
+    above = [r for r in rungs() if r > rung]
+    if short <= rung or (above and short < min(above)):
         return None
     return f"scale=-2:{rung}" if width >= height else f"scale={rung}:-2"
 

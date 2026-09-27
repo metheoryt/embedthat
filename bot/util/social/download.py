@@ -245,7 +245,24 @@ def _entries_of(info: dict[str, Any]) -> list[dict[str, Any] | None]:
     return [info]
 
 
+# ffprobe results by URL, for one download_social_video call: the probe pass, the
+# download pass and the retry pass each judge the same formats, and must agree --
+# a transient ffprobe failure in only one of them would turn a ready file into a
+# merged re-encode at a rung nobody checked the duration for.
+_PROBES: dict[str, dict[str, Any]] = {}
+
+
 def _probe_url(fmt: dict[str, Any]) -> dict[str, Any]:
+    """`_ffprobe_url`, once per URL per download call."""
+    url = fmt.get("url")
+    if not url:
+        return {}
+    if url not in _PROBES:
+        _PROBES[url] = _ffprobe_url(fmt)
+    return _PROBES[url]
+
+
+def _ffprobe_url(fmt: dict[str, Any]) -> dict[str, Any]:
     """ffprobe of a format's URL -- the header only, ~0.6 s. {} when it fails."""
     url = fmt.get("url")
     if not url:
@@ -331,9 +348,20 @@ def _ready_file(formats: list[dict[str, Any]]) -> dict[str, Any] | None:
         # None fits its cap: the lightest of them as is, split after download if
         # it is over the upload limit -- still no re-encode.
         return min(reaching, key=lambda item: item[0])[1]
-    if below:
+    if below and not _any_video_reaches(formats, lowest):
         return max(below, key=lambda item: item[0])[1]
+    # A video-only source reaching the lowest rung exists: the merged ladder
+    # delivers it at >= 480 instead of a ready 360.
     return None
+
+
+def _any_video_reaches(formats: list[dict[str, Any]], rung: int) -> bool:
+    """Any format with a video track whose known short side reaches `rung`."""
+    return any(
+        f.get("vcodec") != "none" and f.get("width") and f.get("height")
+        and min(f["width"], f["height"]) >= rung
+        for f in formats
+    )
 
 
 def _selector_ydl() -> yt_dlp.YoutubeDL:
@@ -469,6 +497,7 @@ def download_social_video(url: str, output_dir: Path) -> DownloadResult:
     Raises SocialDownloadError for unrecoverable failures (private/removed/geo-blocked),
     TransientDownloadError for the ones worth another attempt (429/5xx/timeouts).
     """
+    _PROBES.clear()
     index = carousel_index(url)
     # A plain string spec for the probe: its own pick is never used (the decision
     # below reads the formats), and a callable here would ffprobe every entry twice.
@@ -501,7 +530,9 @@ def download_social_video(url: str, output_dir: Path) -> DownloadResult:
                 for pos in video_positions
                 if _ready_file(entries[pos].get("formats") or []) is None
             ]
-        rung = min(merged_rungs, default=rungs()[0])
+        # All ready: the merger is used only if the download pass judges an entry
+        # otherwise, and then at the lowest rung -- the one with no duration ceiling.
+        rung = min(merged_rungs, default=lowest_rung())
         log.info("%s: %d ready, %d merged at %dp",
                  url, len(video_positions) - len(merged_rungs), len(merged_rungs), rung)
         downloaded = _download_positions(url, video_positions, output_dir, rung)

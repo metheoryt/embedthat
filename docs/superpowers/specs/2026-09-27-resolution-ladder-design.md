@@ -107,6 +107,13 @@ One small module holds what both paths use, so the rule lives in one place:
 - A rung that downloads and merges but comes out over its cap (only possible
   when it was re-encoded -- YouTube serves avc1 up to 1080p, so this is rare)
   has its files deleted before the next rung is tried.
+- **A source between two rungs is copied at the lower one, not scaled**
+  (final review, 2026-09-27). Letterboxed films are served as 1920x800 for
+  "1080p": their short side misses 1080, and scaling them to 720 would re-encode
+  a two-hour film (x264 ~30 fps, killed by the 45-min limit) for a few pixels.
+  They are judged at the lower rung's cap, copied. Only a source reaching the
+  rung above (its own tier missing or over its cap) is scaled, with
+  `-preset veryfast`.
 - `check_download_adaptive`'s split-until-parts-fit loop is unchanged.
 
 ## Social path (`bot/util/social/download.py`, `bot/worker/pipeline.py`)
@@ -119,7 +126,8 @@ reels -- are not re-encoded; the ladder is for long videos. So per video entry:
    lowest and the top rung and whose size fits its own rung's cap; if ready files
    reaching the lowest rung exist but none fits, the lowest of them, as is (split
    after download if it is over the upload limit); a ready file below the lowest
-   rung only when nothing reaches it. Never above the top rung (that would need a
+   rung only when no format of any kind (video-only included) reaches it -- a
+   DASH source at 480+ is merged rather than sent as a ready 360 (final review). Never above the top rung (that would need a
    downscale, i.e. a re-encode).
 2. **No ready file** (DASH-only sites; silent Instagram carousel items, which
    have no sound): the merged ladder below.

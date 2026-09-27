@@ -94,7 +94,7 @@ def _merge(
         return merged
     video_stream_path = _download_video_stream(video, stream, output_path)
     vf = scale_filter(*dims, rung)
-    video_codec_args = ['-c:v', 'copy'] if vf is None else ['-vf', vf, '-c:v', 'libx264']
+    video_codec_args = ['-c:v', 'copy'] if vf is None else ['-vf', vf, '-c:v', 'libx264', '-preset', 'veryfast']
     log.info('merging %s and %s at %dp (%s)', video_stream_path, audio_stream_path, rung, vf or 'copy')
     command = [
         'ffmpeg',
