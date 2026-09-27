@@ -21,7 +21,8 @@ class Settings(BaseSettings):
     admin_chat_id: int | None = None
 
     enable_audio_translation: bool = False
-    max_video_resolution: int = 480
+    # Top of the resolution ladder (bot/util/ladder.py), by the short side.
+    max_video_resolution: int = 1080
     max_playlist_tracks: int = 200
 
     # Netscape-format cookie jar handed to yt-dlp, unlocking posts that require a
