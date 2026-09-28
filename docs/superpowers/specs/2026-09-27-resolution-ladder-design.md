@@ -268,3 +268,17 @@ with the local `telegram-bot-api` and the debug bot:
 
 Release as usual (tag = deploy). Then the one-off `SCAN` + `DEL` of the old
 local keys on latitude, then re-run checks 2 and 3 against the production bot.
+
+## Rehearsal (2026-09-28, `@assinstantbot` on the local server)
+
+| Case | Result | Wall time |
+|---|---|---|
+| Instagram reel `DdRyX3UxtwY` | ready `3`, h264 720x1280, 7 MB, no re-encode | 6 s |
+| VK `video-164579181_456242552` | ready `url720`, 209 MiB, one file (was 3 parts) | 6.5 min, of it 6 min download at ~0.6 MB/s; upload 20 s |
+| YouTube `Jo_yJ3zex2E` (2:43:02) | 1080 estimated 2214 MB > 1000 MB cap, skipped without download; 720 copied, 1256 MB, one file | 10 min: download 4.5 min, merge 3 min, upload 2 min 10 s (~10 MB/s) |
+| YouTube `E6rvW_GoPUI` | 1080 copied, 410 MB, one file | 3.5 min: upload 41 s |
+| TikTok `ZSqUTVCSx` | ready `h264_540p_843912-1`, 576x1024, 25 MB; all `bytevc1` skipped | 11 s |
+
+Upload at ~10 MB/s puts a 2 GB file at ~3.5 min against the 30-min
+`UPLOAD_TIMEOUT`: no change needed.
+

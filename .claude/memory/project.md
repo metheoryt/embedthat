@@ -205,9 +205,25 @@ CLAUDE.md (mirrored into AGENTS.md) instead. Git-tracked — no secrets here.
   group chat can't delete each other's pages. The
   `edit_reply_markup(reply_markup=None)` double-tap guard at the top of
   `get_audio_page` must stay unconditional.
-- The 480p cap picks the **smallest** stream at or above 480p and downscales it
-  (`-vf scale=-2:480 -c:v libx264`), not the largest stream under it — otherwise
-  a 360p/720p-only video is needlessly delivered at 360p.
+- The resolution ladder (`bot/util/ladder.py`, 2026-09-27) picks, per rung, the
+  **smallest** source whose short side reaches it -- not the largest one under
+  it, otherwise a 360p/720p-only video is needlessly delivered lower. A rung the
+  source does not reach is skipped; only the lowest rung falls back to a smaller
+  source. A source between two rungs (letterboxed 1920x800 "1080p") is COPIED at
+  the lower rung, never scaled: scaling re-encodes a whole film. Per-rung caps:
+  1080 <= 1000 MB, 720 <= 1500 MB, 480 <= 2000 MB; split only at 480.
+- The social path sends a **ready file** (mp4, h264, 4:2:0, with sound) as
+  downloaded whenever one exists -- Instagram reels at 720 via formats `1/2/3`,
+  which yt-dlp reports without codec or size (read by ffprobe from the URL), VK
+  via `url720`, TikTok `h264_540p_*` (its `bytevc1` HEVC is never picked). Only
+  entries without one are merged and re-encoded, and there the yt-dlp selector
+  must stay **strict** above the lowest rung: its loose `/best` tail catches any
+  source below the rung and sends it un-re-encoded. A ready 360 loses to any
+  video-only source reaching 480.
+- Measured on the local Bot API server (2026-09-28): upload ~10 MB/s (1256 MB in
+  130 s), so 2 GB is ~3.5 min against the 30-min `UPLOAD_TIMEOUT`. VK serves
+  ~0.6 MB/s (209 MiB in 6 min). The YouTube `-c copy` merge + faststart takes
+  2-3 min for 0.4-1.3 GB.
 - The translation kill switch must gate two points: `target_lang` also feeds the
   Redis cache key, so `message.from_user.language_code` resolution has to be
   skipped in the handler too, or EN and RU users populate two cache entries with
