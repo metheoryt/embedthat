@@ -136,7 +136,7 @@ Redis is simultaneously the cache, the dramatiq broker, and the lock store.
 ### Request Flow
 
 1. User sends a link.
-2. **YouTube** (`youtube.com/watch|shorts`, `youtu.be`) matches its own handler and
+2. **YouTube** (`youtube.com/watch|shorts|live`, `youtu.be`) matches its own handler and
    goes through the YouTube pipeline below.
 3. **Everything else** — Instagram, TikTok, Twitter/X, Facebook, Reddit, … — falls
    into the `embed_social` catch-all, which matches any `https?://` URL that is not
