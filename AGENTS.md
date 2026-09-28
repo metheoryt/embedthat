@@ -111,7 +111,7 @@ Copy `.env.dist` to `.env` and populate:
 - `LOGLEVEL` — default `INFO`
 - `TZ` — timezone used for log timestamps and stats day boundaries
 - `ENABLE_AUDIO_TRANSLATION` — default **false**; YouTube audio translation is off unless set
-- `MAX_VIDEO_RESOLUTION` — default `480`
+- `MAX_VIDEO_RESOLUTION` — default `1080` (top of the 1080 → 720 → 480 ladder)
 - `MAX_PLAYLIST_TRACKS` — default `200`; an abuse guard on playlist *listing*, not on consumption (page downloads are lazy)
 - `COOKIES_FILE` — optional; path to a Netscape-format `cookies.txt` passed to every yt-dlp call (see `bot/util/ytdlp.py`), unlocking posts that demand a logged-in session. Unset, or pointing at a missing file, means no cookies and the pre-cookie behaviour. **Mount it read-write** — yt-dlp writes the refreshed jar back on close, which is what keeps the session from expiring on the exporter's schedule. When a login wall is hit *while* this is set, the worker raises one CRITICAL per 24h to `ADMIN_CHAT_ID` on the assumption the jar went stale.
 
