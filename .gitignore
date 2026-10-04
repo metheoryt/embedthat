@@ -16,3 +16,8 @@ wheels/
 # gortex-generated per-repo routing skills (re-sprayed by `gortex init`; keep out of git)
 .claude/skills/generated/
 .claude/settings.local.json
+
+# Project memory lives in the agent-memory repo (~/.claude/memory/projects/
+# metheoryt/embedthat/); .claude/memory is a symlink to it. No trailing slash: a
+# `/`-suffixed pattern does not match a symlink.
+.claude/memory
