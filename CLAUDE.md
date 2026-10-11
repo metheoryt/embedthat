@@ -118,6 +118,9 @@ Copy `.env.dist` to `.env` and populate:
 - `COOKIES_USER_AGENT` — optional; sent **only alongside the jar**, as the `User-Agent` header on cookie-bearing yt-dlp calls and on the direct fetch of a carousel still. Copy the exact UA of the browser that exported `COOKIES_FILE`, so the session is not replayed under a client it was never created in. Unset leaves yt-dlp's built-in default (Windows Chrome), i.e. the pre-2026-09-15 behaviour — which already matches a Windows-Chrome exporter, so it is worth setting only for any other browser.
   <!-- src: embedthat e51e2fb | 2026-09-17 -->
 
+- `BOT_API_URL` — optional; our own `telegram-bot-api` server in local mode (e.g. `http://telegram-bot-api:8081`). The single switch: it also sets the upload limit (2000 MB vs 50 MiB) and the video cache tag. Unset or empty = Telegram's cloud. `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` (my.telegram.org) are read by the server container itself.
+  <!-- src: embedthat cf0fad6 | 2026-10-11 -->
+
 ## Architecture
 
 ### Two processes
@@ -132,6 +135,9 @@ Redis is simultaneously the cache, the dramatiq broker, and the lock store.
   (`bot/worker/actors.py`).
 - The worker downloads/merges/uploads (`bot/worker/pipeline.py`), then pops the
   whole waiter list and fans the result out to every waiting chat.
+
+- **A third service, `telegram-bot-api`** (our own Bot API server in local mode, pinned by digest), sits beside bot, worker and redis when `BOT_API_URL` is set — prod since 2026-09-26. `bot/util/tg.py::make_bot` is the only place a `Bot` is built: the API server is per-session, so a `Bot` made anywhere else silently keeps talking to the cloud, where the token is logged out.
+  <!-- src: embedthat cf0fad6 | 2026-10-11 -->
 
 ### Request Flow
 
@@ -162,6 +168,10 @@ Add to it only for hosts that can never carry media — never for a platform tha
 merely fails often.
 <!-- src: embedthat 256f935 | 2026-09-17 -->
 
+- **The social path re-encodes only as a fallback.** A ready file (mp4, h264, 4:2:0, with sound) is sent as downloaded; only entries without one are merged and re-encoded to H.264/AAC (`bot/util/social/download.py`).
+  <!-- conflicts-with: "downloads it with yt-dlp, re-encoding to iOS-compatible H.264/AAC and re-uploading as a native Telegram video" -->
+  <!-- src: embedthat cf0fad6 | 2026-10-11 -->
+
 ### Admin-only surfaces (`ADMIN_CHAT_ID`)
 
 Both check `message.chat.id == settings.admin_chat_id` and return silently
@@ -185,6 +195,11 @@ otherwise — a non-admin never learns they exist.
 - An `aud:` inline button on the delivered video triggers audio-only extraction
   (`process_youtube_audio`), cached on the same `yt:<id>` entry
 
+- **The upload limit is no longer 50 MB.** Every size check reads `settings.max_upload_size_bytes`, derived from `BOT_API_URL`: 2000 MB (decimal) against our own local-mode server, 50 MiB against Telegram's cloud. `video.py` walks the 1080 -> 720 -> 480 ladder (`bot/util/ladder.py`, per-rung caps 1000/1500/2000 MB) and splits only at 480. With the local server the cache entry is `ytl:<id>`, not `yt:<id>` (`Settings.video_cache_tag`).
+  <!-- conflicts-with: "selects best adaptive stream within Telegram's 50 MB limit, downloads video and audio separately, merges with FFmpeg, splits into ≤50 MB parts if needed (up to 10 parts)" -->
+  <!-- conflicts-with: "cached on the same `yt:<id>` entry" -->
+  <!-- src: embedthat cf0fad6 | 2026-10-11 -->
+
 ### Audio Pipeline (`bot/util/audio/`)
 
 - Handles audio-only links — SoundCloud, Bandcamp, Mixcloud, Audiomack, Yandex
@@ -196,6 +211,10 @@ otherwise — a non-admin never learns they exist.
   for `file_id`s), `au:<extractor>:<id>` is the durable per-track dedup entry that
   is never clobbered — the split self-heals last-write-wins races between pages.
 - A track over the 50 MB cap is **rejected**, not ffmpeg-split like video.
+
+- The per-track cap is `settings.max_upload_size_bytes` too — 2000 MB on the local Bot API server, 50 MiB on the cloud.
+  <!-- conflicts-with: "A track over the 50 MB cap is **rejected**" -->
+  <!-- src: embedthat cf0fad6 | 2026-10-11 -->
 
 ### Key Patterns
 
