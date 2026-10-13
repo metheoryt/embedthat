@@ -146,9 +146,11 @@ Redis is simultaneously the cache, the dramatiq broker, and the lock store.
    goes through the YouTube pipeline below.
 3. **Everything else** — Instagram, TikTok, Twitter/X, Facebook, Reddit, … — falls
    into the `embed_social` catch-all, which matches any `https?://` URL that is not
-   YouTube and downloads it with yt-dlp, re-encoding to iOS-compatible H.264/AAC and
-   re-uploading as a native Telegram video. There is no domain rewriting or proxy
-   embedding anywhere in the codebase.
+   YouTube and downloads it with yt-dlp, re-uploading it as a native Telegram video:
+   a ready file (mp4, h264, 4:2:0, with sound) is sent as downloaded, and only an
+   entry without one is merged and re-encoded to iOS-compatible H.264/AAC
+   (`bot/util/social/download.py`). There is
+   no domain rewriting or proxy embedding anywhere in the codebase.
 4. A link whose formats carry no video track (`vcodec == 'none'`) is classified as
    **audio** and routed to the audio pipeline instead. Classification is generic —
    never a domain allowlist — and costs one extra yt-dlp probe per uncached link.
@@ -168,10 +170,6 @@ Add to it only for hosts that can never carry media — never for a platform tha
 merely fails often.
 <!-- src: embedthat 256f935 | 2026-09-17 -->
 
-- **The social path re-encodes only as a fallback.** A ready file (mp4, h264, 4:2:0, with sound) is sent as downloaded; only entries without one are merged and re-encoded to H.264/AAC (`bot/util/social/download.py`).
-  <!-- conflicts-with: "downloads it with yt-dlp, re-encoding to iOS-compatible H.264/AAC and re-uploading as a native Telegram video" -->
-  <!-- src: embedthat cf0fad6 | 2026-10-11 -->
-
 ### Admin-only surfaces (`ADMIN_CHAT_ID`)
 
 Both check `message.chat.id == settings.admin_chat_id` and return silently
@@ -187,17 +185,15 @@ otherwise — a non-admin never learns they exist.
 
 ### YouTube Pipeline (`bot/util/youtube/`)
 
-- `video.py` — main orchestration: selects best adaptive stream within Telegram's 50 MB limit, downloads video and audio separately, merges with FFmpeg, splits into ≤50 MB parts if needed (up to 10 parts)
+- `video.py` — main orchestration: walks the 1080 -> 720 -> 480 resolution ladder (`bot/util/ladder.py`) against `settings.max_upload_size_bytes`, downloads video and audio separately, merges with FFmpeg, and splits only at 480 if nothing fits (up to 10 parts)
 - `translate.py` — detects source language via Whisper (tiny model), translates audio using the `vot-cli` Node.js tool, mixes original (quieted) + translated audio with pydub
 - `schema.py` — `YouTubeVideoData` Pydantic model for cached video metadata
 - Redis caches processed `file_id`s to avoid re-downloading; `HeartbeatLock`
   (`bot/util/redis_lock.py`) prevents concurrent processing of the same video
 - An `aud:` inline button on the delivered video triggers audio-only extraction
-  (`process_youtube_audio`), cached on the same `yt:<id>` entry
+  (`process_youtube_audio`), cached on the same video entry (`yt<tag>:<id>` — `ytl:<id>` on the local Bot API server, `Settings.video_cache_tag`)
 
 - **The upload limit is no longer 50 MB.** Every size check reads `settings.max_upload_size_bytes`, derived from `BOT_API_URL`: 2000 MB (decimal) against our own local-mode server, 50 MiB against Telegram's cloud. `video.py` walks the 1080 -> 720 -> 480 ladder (`bot/util/ladder.py`, per-rung caps 1000/1500/2000 MB) and splits only at 480. With the local server the cache entry is `ytl:<id>`, not `yt:<id>` (`Settings.video_cache_tag`).
-  <!-- conflicts-with: "selects best adaptive stream within Telegram's 50 MB limit, downloads video and audio separately, merges with FFmpeg, splits into ≤50 MB parts if needed (up to 10 parts)" -->
-  <!-- conflicts-with: "cached on the same `yt:<id>` entry" -->
   <!-- src: embedthat cf0fad6 | 2026-10-11 -->
 
 ### Audio Pipeline (`bot/util/audio/`)
@@ -210,11 +206,7 @@ otherwise — a non-admin never learns they exist.
 - Two-tier cache: `da:<hash16>` holds the ordered track index (non-authoritative
   for `file_id`s), `au:<extractor>:<id>` is the durable per-track dedup entry that
   is never clobbered — the split self-heals last-write-wins races between pages.
-- A track over the 50 MB cap is **rejected**, not ffmpeg-split like video.
-
-- The per-track cap is `settings.max_upload_size_bytes` too — 2000 MB on the local Bot API server, 50 MiB on the cloud.
-  <!-- conflicts-with: "A track over the 50 MB cap is **rejected**" -->
-  <!-- src: embedthat cf0fad6 | 2026-10-11 -->
+- A track over the upload cap (`settings.max_upload_size_bytes` — 2000 MB on the local Bot API server, 50 MiB on the cloud) is **rejected**, not ffmpeg-split like video.
 
 ### Key Patterns
 
