@@ -36,6 +36,10 @@ _LOGIN_WALL_MARKERS = (
     "login required",
     "requires authentication",
     "use --cookies",
+    # Instagram's audience gate (age / region restricted reel): anonymous fetches
+    # get this, a logged-in adult session sees the post (measured 2026-10-29,
+    # reel DfEG9z7owZr: fails without the jar, extracts with it).
+    "isn't available to everyone",
 )
 
 
