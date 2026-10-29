@@ -13,7 +13,7 @@ import yt_dlp
 
 from bot.config import settings
 from bot.util.ladder import fits, lowest_rung, rungs, scale_expression
-from bot.util.ytdlp import extract_info
+from bot.util.ytdlp import cookie_opts, extract_info
 
 from .exc import SocialDownloadError
 
@@ -428,9 +428,14 @@ def _download_positions(url: str, positions: list[int], output_dir: Path, rung: 
     """Downloads the given 1-based playlist positions, returning entry id -> file.
 
     `ignoreerrors="only_download"` is what makes a carousel survive one bad item:
-    a position whose media 403s is skipped instead of aborting the post. Scoped to
-    downloads on purpose -- an *extraction* error still raises, so a login wall
-    reaches `extract_info`'s cookie retry rather than being silently swallowed.
+    a position whose media 403s is skipped instead of aborting the post. It does
+    NOT let an extraction error through: yt-dlp's `trouble()` raises only when
+    `ignoreerrors` is falsy, so a top-level login wall is printed and comes back
+    as `None`, never reaching `extract_info`'s cookie retry (measured 2026-10-29,
+    audience-gated reel `DfEG9z7owZr`). That `None` is retried with the jar here
+    instead. It is not the "spend the jar only on a wall" rule broken: the probe
+    extracted this very post moments ago, so an extraction that now fails whole
+    is the wall the probe already walked through with cookies.
 
     Nothing is inferred from what comes back: files are matched to entries by id,
     so a missing position stays missing instead of being filled by its neighbour.
@@ -465,6 +470,9 @@ def _download_positions(url: str, positions: list[int], output_dir: Path, rung: 
         ],
     }
     done = extract_info(url, opts, SocialDownloadError, download=True)
+    if done is None and (jar := cookie_opts()):
+        log.info("download pass of %s extracted nothing, retrying with the cookie jar", url)
+        done = extract_info(url, {**opts, **jar}, SocialDownloadError, download=True)
     if done is None:
         return {}
 
